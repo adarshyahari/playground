@@ -1,18 +1,18 @@
-
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
 #root {
   background: #000;
-  height: 100vh;
-  min-height: 380px;
   display: flex;
+  height: 100vh;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
   padding: 2.5rem 3rem;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
 }
-#scene { position: relative; width: 100%; height: 100vh; min-height: 60px; }
+
+#scene { position: relative; width: 100%; height: 100%; }
 #canvas { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
 #text-layer {
   font-size: 30px; font-weight: 400; color: #fff;
@@ -31,6 +31,8 @@
   background: #1a1a1a; border: 0.5px solid #444; color: #fff;
   padding: 10px 20px; border-radius: 999px; font-size: 14px;
   cursor: pointer; display:flex; align-items:center; gap:8px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 #mic-btn:hover { background: #2a2a2a; }
 #mic-btn.on { border-color: #a855f7; color: #d8b4fe; }
@@ -38,12 +40,16 @@
   background: #1a1a1a; border: 0.5px solid #444; color: #fff;
   padding: 10px 20px; border-radius: 999px; font-size: 14px;
   cursor: pointer; display:flex; align-items:center; gap:8px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 #type-btn:hover { background: #2a2a2a; }
 #type-btn.on { border-color: #38bdf8; color: #7dd3fc; }
 #clear-btn {
   background: transparent; border: 0.5px solid #333; color: #555;
   padding: 10px 16px; border-radius: 999px; font-size: 14px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 #clear-btn:hover { border-color: #555; color: #888; }
 .dot { width:8px; height:8px; border-radius:50%; background:#555; flex-shrink:0; }
@@ -59,9 +65,88 @@
   padding:10px 16px; border-radius:8px; font-size:16px;
   width:100%; outline:none;
   font-family:-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  /* Prevent iOS zoom on focus */
+  font-size: max(16px, 1em);
 }
 #type-input:focus { border-color:#38bdf8; }
 #type-hint { font-size:12px; color:#444; margin-top:6px; }
+
+/* ── Mobile overrides ── */
+@media (max-width: 600px) {
+  #root {
+    padding: 1.5rem 1.25rem;
+    min-height: 280px;
+    border-radius: 0;
+  }
+
+  #text-layer {
+    font-size: 22px;
+    min-height: 34px;
+  }
+
+  #sizer {
+    font-size: 22px;
+  }
+
+  #controls {
+    margin-top: 1.25rem;
+    gap: 8px;
+  }
+
+  #mic-btn,
+  #type-btn {
+    padding: 10px 16px;
+    font-size: 13px;
+    /* Larger tap targets */
+    min-height: 44px;
+  }
+
+  #clear-btn {
+    padding: 10px 14px;
+    font-size: 13px;
+    min-height: 44px;
+  }
+
+  #type-hint {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  #version {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 380px) {
+  #text-layer {
+    font-size: 18px;
+    min-height: 28px;
+  }
+
+  #sizer {
+    font-size: 18px;
+  }
+
+  #root {
+    padding: 1.25rem 1rem;
+  }
+}
+
+/* Landscape phone */
+@media (max-height: 500px) and (orientation: landscape) {
+  #root {
+    min-height: unset;
+    padding: 1rem 1.5rem;
+  }
+
+  #controls {
+    margin-top: 0.75rem;
+  }
+
+  #type-input-wrap {
+    margin-top: 0.5rem;
+  }
+}
 </style>
 
 <div id="root">
@@ -76,7 +161,7 @@
     <span id="status">ready</span>
   </div>
   <div id="type-input-wrap">
-    <input id="type-input" type="text" placeholder="Type here — space adds a word, backspace removes last" autocomplete="off" />
+    <input id="type-input" type="text" placeholder="Space adds a word · Backspace removes last" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
     <div id="type-hint">Space / Enter → reveal word &nbsp;·&nbsp; Backspace on empty → erase last word</div>
   </div>
   <div id="version">v13.0</div>
@@ -110,17 +195,29 @@ let phase = 'idle';
 let fwdStartX = 0, fwdStartY = 0, fwdWord = '', fwdWordW = 0, fwdRectW = 0, fwdSweepX = 0;
 let erWord = '', erWordW = 0, erRightX = 0, erLeftX = 0, erCursorX = 0, erY = 0, erH = 0;
 
-const FS = 30, LH = FS * 1.5, SPEED = 5;
+// Dynamically read font size from computed style so canvas matches text layer
+function getFontSize() {
+  return parseFloat(getComputedStyle(document.getElementById('text-layer')).fontSize);
+}
+
+let FS = getFontSize();
+let LH = FS * 1.5;
+const SPEED = 5;
+
+function syncFontMetrics() {
+  FS = getFontSize();
+  LH = FS * 1.5;
+  sizer.style.fontSize = FS + 'px';
+}
 
 function measure(t) { sizer.textContent = t; return sizer.getBoundingClientRect().width; }
 
 function syncCanvas() {
+  syncFontMetrics();
   canvas.width = scene.offsetWidth;
   canvas.height = Math.max(scene.offsetHeight, LH + 20);
 }
 
-// Key insight: caret-anchor contains a zero-width space so it has real line height.
-// Its getBoundingClientRect gives us top/height of the current line accurately.
 function getCaretPos() {
   const sceneRect = scene.getBoundingClientRect();
   const r = caretAnchor.getBoundingClientRect();
@@ -134,7 +231,6 @@ function getCaretPos() {
 function posForText(txt) {
   const prev = displayEl.textContent;
   displayEl.textContent = txt;
-  // Force layout read
   const pos = getCaretPos();
   displayEl.textContent = prev;
   return pos;
@@ -298,17 +394,14 @@ function triggerErase() {
   erWord = committedWords[committedWords.length - 1];
   const before = committedWords.slice(0,-1).join(' ');
 
-  // Right edge: true caret pos at end of full committed text
   const rightPos = getCaretPos();
   erRightX = rightPos.x;
   erY = rightPos.y;
   erH = rightPos.h;
 
-  // Left edge: caret pos after text before last word (+ space)
   const leftPos = posForText(before + (before ? ' ' : ''));
   erLeftX = leftPos.x;
 
-  // If word wrapped to new line, erLeftX may be > erRightX — use measured width as fallback
   erWordW = (erRightX > erLeftX) ? (erRightX - erLeftX) : measure(erWord);
   if (erRightX <= erLeftX) {
     erLeftX = erRightX - erWordW;
@@ -396,6 +489,23 @@ function clearAll() {
   lastFinalWordCount=0; phase='idle'; fwdRectW=0;
   displayEl.textContent=''; statusEl.textContent='ready';
 }
+
+// Re-sync canvas on resize (handles rotation, browser resize)
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    syncCanvas();
+    // Re-measure and re-draw current text after layout settles
+    displayEl.textContent = committedStr();
+  }, 100);
+});
+
+// Also handle viewport changes (virtual keyboard on mobile)
+window.visualViewport && window.visualViewport.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(syncCanvas, 100);
+});
 
 syncCanvas();
 drawFrame();
