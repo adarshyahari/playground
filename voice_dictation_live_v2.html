@@ -1,0 +1,276 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+#root {
+  background: #000;
+  min-height: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 2.5rem 3rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+}
+#scene { position: relative; width: 100%; min-height: 140px; }
+#canvas { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
+#text-layer {
+  font-size: 30px; font-weight: 400; color: #fff;
+  line-height: 1.5; letter-spacing: -0.01em;
+  white-space: pre-wrap; word-break: break-word; min-height: 46px;
+}
+#sizer {
+  position: absolute; visibility: hidden;
+  font-size: 30px; font-weight: 400;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  letter-spacing: -0.01em; white-space: pre; top:0; left:0;
+}
+#interim-text { color: #666; }
+#controls { margin-top: 1.5rem; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+#mic-btn {
+  background: #1a1a1a; border: 0.5px solid #444; color: #fff;
+  padding: 10px 24px; border-radius: 999px; font-size: 14px;
+  cursor: pointer; display:flex; align-items:center; gap:8px;
+}
+#mic-btn:hover { background: #2a2a2a; }
+#mic-btn.on { border-color: #a855f7; color: #d8b4fe; }
+#clear-btn {
+  background: transparent; border: 0.5px solid #333; color: #555;
+  padding: 10px 18px; border-radius: 999px; font-size: 14px; cursor: pointer;
+}
+#clear-btn:hover { border-color: #555; color: #888; }
+.dot { width:8px; height:8px; border-radius:50%; background:#555; }
+#mic-btn.on .dot { background:#a855f7; animation: p 1s infinite; }
+@keyframes p { 0%,100%{opacity:1}50%{opacity:.3} }
+#status { font-size: 13px; color: #666; }
+</style>
+
+<div id="root">
+  <div id="scene">
+    <canvas id="canvas"></canvas>
+    <div id="text-layer">
+      <span id="sizer"></span><span id="final-text"></span><span id="interim-text"></span>
+    </div>
+  </div>
+  <div id="controls">
+    <button id="mic-btn" onclick="toggleMic()">
+      <span class="dot"></span>
+      <span id="lbl">Start speaking</span>
+    </button>
+    <button id="clear-btn" onclick="clearAll()">Clear</button>
+    <span id="status">ready</span>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const scene = document.getElementById('scene');
+const sizer = document.getElementById('sizer');
+const finalEl = document.getElementById('final-text');
+const interimEl = document.getElementById('interim-text');
+const micBtn = document.getElementById('mic-btn');
+const lbl = document.getElementById('lbl');
+const statusEl = document.getElementById('status');
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) statusEl.textContent = 'Not supported — use Chrome';
+
+let recog = null;
+let micOn = false;
+let restarting = false;
+
+let lastFinalText = '';
+let pendingWords = [];
+let hue = 270;
+let phase = 'idle';
+let rectX = 0, rectW = 0, rectTargetW = 0, rectH = 0, rectY = 0;
+let sweepWord = '', sweepFull = 0;
+
+function measure(t) { sizer.textContent = t; return sizer.offsetWidth; }
+
+function syncCanvas() {
+  canvas.width = scene.offsetWidth;
+  canvas.height = Math.max(scene.offsetHeight, 60);
+}
+
+function rRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+function drawFrame() {
+  syncCanvas();
+  hue = (hue + 1.0) % 360;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const lineH = 30 * 1.5;
+  const capH = 30 * 0.72;
+  const top = (lineH - capH) / 2 - 2;
+  rectH = capH + 8; rectY = top;
+
+  if (phase === 'expand') {
+    rectW += (rectTargetW - rectW) * 0.15;
+    if (rectTargetW - rectW < 0.8) { rectW = rectTargetW; phase = 'sweep'; }
+  } else if (phase === 'sweep') {
+    rectX += 4; rectW -= 4;
+    if (rectW <= 3) {
+      rectW = 0; phase = 'idle';
+      lastFinalText += (lastFinalText ? ' ' : '') + sweepWord;
+      finalEl.textContent = lastFinalText;
+      interimEl.textContent = '';
+      tryNextWord();
+    } else {
+      const frac = Math.max(0, 1 - rectW / sweepFull);
+      finalEl.textContent = lastFinalText + (lastFinalText ? ' ' : '') + sweepWord.slice(0, Math.ceil(sweepWord.length * frac));
+    }
+  }
+
+  if (rectW > 0.5) {
+    const cright = rectX + rectW;
+    const bx = rectX + rectW / 2, by = rectY + rectH / 2;
+    const bloom = ctx.createRadialGradient(bx, by, 0, bx, by, rectW + 30);
+    bloom.addColorStop(0, `hsla(${hue},80%,70%,0.2)`);
+    bloom.addColorStop(1, `hsla(${hue},80%,70%,0)`);
+    ctx.beginPath();
+    ctx.ellipse(bx, by, rectW + 30, rectH + 20, 0, 0, Math.PI*2);
+    ctx.fillStyle = bloom; ctx.fill();
+
+    const grad = ctx.createLinearGradient(rectX, 0, cright, 0);
+    grad.addColorStop(0, `hsla(${hue},80%,75%,0)`);
+    grad.addColorStop(0.35, `hsla(${hue},80%,78%,0.45)`);
+    grad.addColorStop(1, `hsla(${hue},80%,85%,0.85)`);
+    rRect(rectX, rectY, rectW, rectH, 4);
+    ctx.fillStyle = grad; ctx.fill();
+
+    ctx.save();
+    ctx.shadowColor = `hsl(${hue},90%,70%)`; ctx.shadowBlur = 10;
+    ctx.fillStyle = `hsl(${hue},90%,72%)`;
+    rRect(cright - 2.5, rectY, 2.5, rectH, 1.5); ctx.fill();
+    ctx.restore();
+  } else {
+    const tx = measure(finalEl.textContent + interimEl.textContent);
+    ctx.save();
+    ctx.shadowColor = `hsl(${hue},90%,70%)`; ctx.shadowBlur = 8;
+    ctx.fillStyle = `hsl(${hue},90%,72%)`;
+    rRect(tx + 1, rectY, 2.5, rectH, 1.5); ctx.fill();
+    ctx.restore();
+  }
+
+  requestAnimationFrame(drawFrame);
+}
+
+function tryNextWord() {
+  if (pendingWords.length === 0) return;
+  sweepWord = pendingWords.shift();
+  const prefix = lastFinalText ? lastFinalText + ' ' : '';
+  sweepFull = measure(sweepWord) + 2;
+  rectX = measure(prefix);
+  rectW = 0; rectTargetW = sweepFull;
+  phase = 'expand';
+}
+
+function queueWords(transcript) {
+  const incoming = transcript.trim().split(/\s+/).filter(Boolean);
+  // Only queue words we haven't committed or queued yet
+  const committed = lastFinalText.trim().split(/\s+/).filter(w => w);
+  const alreadyDone = committed.length + pendingWords.length + (phase !== 'idle' ? 1 : 0);
+  const newOnes = incoming.slice(alreadyDone);
+  newOnes.forEach(w => pendingWords.push(w));
+  if (phase === 'idle' && pendingWords.length > 0) tryNextWord();
+}
+
+function createRecog() {
+  if (!SR) return null;
+  const r = new SR();
+  r.continuous = false;      // single-shot — avoids permission loop on file://
+  r.interimResults = true;
+  r.lang = 'en-US';
+  r.maxAlternatives = 1;
+
+  r.onstart = () => {
+    restarting = false;
+    statusEl.textContent = 'listening...';
+  };
+
+  r.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        queueWords(t);
+      } else {
+        interim = t;
+      }
+    }
+    interimEl.textContent = interim ? (lastFinalText ? ' ' : '') + interim : '';
+  };
+
+  r.onerror = (e) => {
+    if (e.error === 'no-speech') {
+      // silence — just restart quietly
+    } else if (e.error === 'not-allowed') {
+      statusEl.textContent = 'mic blocked — allow in browser settings';
+      setMicOff(); return;
+    } else {
+      statusEl.textContent = 'error: ' + e.error;
+    }
+  };
+
+  r.onend = () => {
+    interimEl.textContent = '';
+    if (micOn && !restarting) {
+      restarting = true;
+      // Small delay before restart to avoid hammering the permission dialog
+      setTimeout(() => {
+        if (micOn) {
+          recog = createRecog();
+          recog.start();
+        }
+      }, 250);
+    }
+  };
+
+  return r;
+}
+
+function toggleMic() {
+  if (!SR) { statusEl.textContent = 'Use Chrome for Speech API'; return; }
+  micOn ? setMicOff() : setMicOn();
+}
+
+function setMicOn() {
+  micOn = true;
+  micBtn.classList.add('on');
+  lbl.textContent = 'Stop';
+  statusEl.textContent = 'starting...';
+  recog = createRecog();
+  recog.start();
+}
+
+function setMicOff() {
+  micOn = false;
+  restarting = false;
+  micBtn.classList.remove('on');
+  lbl.textContent = 'Start speaking';
+  statusEl.textContent = 'ready';
+  if (recog) { try { recog.abort(); } catch(e){} recog = null; }
+}
+
+function clearAll() {
+  setMicOff();
+  lastFinalText = ''; pendingWords = []; phase = 'idle'; rectW = 0;
+  finalEl.textContent = ''; interimEl.textContent = '';
+}
+
+syncCanvas();
+drawFrame();
+</script>
