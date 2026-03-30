@@ -361,7 +361,7 @@ function drawFrame() {
       phase = 'idle';
       committedWords.push(fwdWord);
       displayEl.textContent = committedStr();
-      tryNextWord();
+      if (eraseQueue > 0) { drainEraseQueue(); } else { tryNextWord(); }
     } else {
       const frac = 1 - remaining / fwdWordW;
       const partial = fwdWord.slice(0, Math.ceil(fwdWord.length * frac));
@@ -386,7 +386,7 @@ function drawFrame() {
       committedWords.pop();
       displayEl.textContent = committedStr();
       phase = 'idle';
-      tryNextWord();
+      if (eraseQueue > 0) { drainEraseQueue(); } else { tryNextWord(); }
     } else {
       const frac = remaining / erWordW;
       const charsLeft = Math.ceil(erWord.length * frac);
@@ -511,53 +511,85 @@ function setTypeOff() {
   typeInput.value='';
   ghostInput.value=''; ghostInput.blur();
 }
-typeInput.addEventListener('keydown', (e) => {
-  if (e.key===' '||e.key==='Spacebar') {
-    e.preventDefault();
-    const word = typeInput.value.trim();
-    if (word) { queueWord(word); typeInput.value=''; }
-  } else if (e.key==='Backspace' && typeInput.value==='') {
-    e.preventDefault();
-    if (pendingWords.length > 0) { pendingWords.pop(); return; }
-    triggerErase();
-  } else if (e.key==='Enter') {
-    e.preventDefault();
-    const word = typeInput.value.trim();
-    if (word) { queueWord(word); typeInput.value=''; }
+// ── Erase queue: allows rapid backspace to stack up erases ──────────────
+let eraseQueue = 0;
+function scheduleErase() {
+  eraseQueue++;
+  drainEraseQueue();
+}
+function drainEraseQueue() {
+  if (eraseQueue === 0) return;
+  // First clear any pending (not-yet-animated) words
+  if (pendingWords.length > 0) {
+    const drain = Math.min(eraseQueue, pendingWords.length);
+    pendingWords.splice(pendingWords.length - drain, drain);
+    eraseQueue -= drain;
+    if (eraseQueue === 0) return;
   }
-});
-// Mobile soft keyboards don't always fire keydown for space — use input event as fallback
-typeInput.addEventListener('input', (e) => {
-  const val = typeInput.value;
-  if (val.includes(' ')) {
-    const word = val.trim();
-    if (word) { queueWord(word); }
-    typeInput.value = '';
-  }
-});
-// Ghost input listeners for mobile (no visible box)
-// On mobile, DON'T preventDefault on space — let it land in the value,
-// then the input event catches it. keydown only handles Backspace/Enter.
-ghostInput.addEventListener('keydown', (e) => {
-  if (e.key==='Backspace' && ghostInput.value==='') {
-    e.preventDefault();
-    if (pendingWords.length > 0) { pendingWords.pop(); return; }
-    triggerErase();
-  } else if (e.key==='Enter') {
-    e.preventDefault();
-    const word = ghostInput.value.trim();
-    if (word) { queueWord(word); ghostInput.value=''; }
-  }
-});
-ghostInput.addEventListener('input', () => {
-  const val = ghostInput.value;
-  // Commit on space (covers soft keyboard space which skips keydown)
-  if (val.includes(' ')) {
-    const word = val.trim();
-    if (word) { queueWord(word); }
-    ghostInput.value = '';
-  }
-});
+  // If an animation is running, wait until it finishes (tryNextWord/triggerErase hooks will call back)
+  if (phase !== 'idle') return;
+  if (committedWords.length === 0) { eraseQueue = 0; return; }
+  eraseQueue--;
+  triggerErase();
+}
+
+// Hook into the end of erase animation to drain the queue
+const _origTryNextWord = tryNextWord;
+// We'll patch the erase completion points in drawFrame instead via a flag check:
+// After each erase completes (phase goes idle via erase_wipe), call drainEraseQueue.
+// We do this by wrapping the phase-idle transitions inside drawFrame.
+// Simpler: poll in rAF — drainEraseQueue is cheap when queue is empty.
+
+// ── Composition guard (mobile IME) ───────────────────────────────────────
+let composing = false;
+
+function attachInputListeners(el) {
+  el.addEventListener('compositionstart', () => { composing = true; });
+  el.addEventListener('compositionend', (e) => {
+    composing = false;
+    // compositionend value may include the committed text — treat as normal input
+    const val = el.value;
+    if (val.includes(' ')) {
+      const word = val.trim();
+      if (word) { queueWord(word); }
+      el.value = '';
+    }
+  });
+
+  el.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      if (!composing) {
+        e.preventDefault();
+        const word = el.value.trim();
+        if (word) { queueWord(word); el.value = ''; }
+      }
+    } else if (e.key === 'Backspace') {
+      if (el.value === '') {
+        e.preventDefault();
+        scheduleErase();
+      }
+      // else let backspace delete the typed char normally
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const word = el.value.trim();
+      if (word) { queueWord(word); el.value = ''; }
+    }
+  });
+
+  el.addEventListener('input', (e) => {
+    if (composing) return; // wait for compositionend
+    const val = el.value;
+    if (val.includes(' ')) {
+      const word = val.trim();
+      if (word) { queueWord(word); }
+      el.value = '';
+    }
+  });
+}
+
+attachInputListeners(typeInput);
+attachInputListeners(ghostInput);
+
 ghostInput.addEventListener('blur', () => {
   if (typeOn && isMobileDevice()) setTimeout(() => ghostInput.focus(), 50);
 });
