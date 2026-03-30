@@ -529,19 +529,17 @@ typeInput.addEventListener('keydown', (e) => {
 // Mobile soft keyboards don't always fire keydown for space — use input event as fallback
 typeInput.addEventListener('input', (e) => {
   const val = typeInput.value;
-  if (val.endsWith(' ')) {
+  if (val.includes(' ')) {
     const word = val.trim();
     if (word) { queueWord(word); }
     typeInput.value = '';
   }
 });
 // Ghost input listeners for mobile (no visible box)
+// On mobile, DON'T preventDefault on space — let it land in the value,
+// then the input event catches it. keydown only handles Backspace/Enter.
 ghostInput.addEventListener('keydown', (e) => {
-  if (e.key===' '||e.key==='Spacebar') {
-    e.preventDefault();
-    const word = ghostInput.value.trim();
-    if (word) { queueWord(word); ghostInput.value=''; }
-  } else if (e.key==='Backspace' && ghostInput.value==='') {
+  if (e.key==='Backspace' && ghostInput.value==='') {
     e.preventDefault();
     if (pendingWords.length > 0) { pendingWords.pop(); return; }
     triggerErase();
@@ -553,14 +551,15 @@ ghostInput.addEventListener('keydown', (e) => {
 });
 ghostInput.addEventListener('input', () => {
   const val = ghostInput.value;
-  if (val.endsWith(' ')) {
+  // Commit on space (covers soft keyboard space which skips keydown)
+  if (val.includes(' ')) {
     const word = val.trim();
     if (word) { queueWord(word); }
     ghostInput.value = '';
   }
 });
 ghostInput.addEventListener('blur', () => {
-  if (typeOn && isMobileDevice()) ghostInput.focus();
+  if (typeOn && isMobileDevice()) setTimeout(() => ghostInput.focus(), 50);
 });
 function clearAll() {
   setMicOff(); setTypeOff();
