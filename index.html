@@ -18,14 +18,14 @@
   font-size: 30px; font-weight: 400; color: #fff;
   line-height: 1.5; letter-spacing: -0.01em;
   white-space: pre-wrap; word-break: break-word; min-height: 46px;
+  position: relative; z-index: 1;
 }
 #sizer {
   position: absolute; visibility: hidden;
   font-size: 30px; font-weight: 400;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-  letter-spacing: -0.01em; white-space: pre; top:0; left:0;
+  letter-spacing: -0.01em; white-space: pre; top:0; left:0; z-index:0;
 }
-#interim-text { color: #666; }
 #controls { margin-top: 1.5rem; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
 #mic-btn {
   background: #1a1a1a; border: 0.5px solid #444; color: #fff;
@@ -48,9 +48,7 @@
 <div id="root">
   <div id="scene">
     <canvas id="canvas"></canvas>
-    <div id="text-layer">
-      <span id="sizer"></span><span id="final-text"></span><span id="interim-text"></span>
-    </div>
+    <div id="text-layer"><span id="sizer"></span><span id="display-text"></span></div>
   </div>
   <div id="controls">
     <button id="mic-btn" onclick="toggleMic()">
@@ -67,8 +65,7 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const scene = document.getElementById('scene');
 const sizer = document.getElementById('sizer');
-const finalEl = document.getElementById('final-text');
-const interimEl = document.getElementById('interim-text');
+const displayEl = document.getElementById('display-text');
 const micBtn = document.getElementById('mic-btn');
 const lbl = document.getElementById('lbl');
 const statusEl = document.getElementById('status');
@@ -80,14 +77,49 @@ let recog = null;
 let micOn = false;
 let restarting = false;
 
-let lastFinalText = '';
+// Text state — only what's fully revealed
+let committedText = '';
+// Queue of complete words waiting to animate
 let pendingWords = [];
+
+// Glow/cursor animation state
 let hue = 270;
-let phase = 'idle';
-let rectX = 0, rectW = 0, rectTargetW = 0, rectH = 0, rectY = 0;
+let phase = 'idle'; // idle | expand | sweep
+let rectX = 0, rectW = 0, rectTargetW = 0;
 let sweepWord = '', sweepFull = 0;
 
-function measure(t) { sizer.textContent = t; return sizer.offsetWidth; }
+// Canvas geometry — computed from a reference char
+const FONT_SIZE = 30;
+const LINE_HEIGHT = FONT_SIZE * 1.5;
+
+function measure(t) {
+  sizer.textContent = t;
+  return sizer.offsetWidth;
+}
+
+// Get pixel Y of the current line's top and height for the cursor
+// We do this by measuring where the text currently sits
+function getCursorGeometry() {
+  // Use the bounding rect of displayEl relative to scene
+  const sceneRect = scene.getBoundingClientRect();
+  const textRect = displayEl.getBoundingClientRect();
+  const relTop = textRect.top - sceneRect.top;
+
+  // Height of one line
+  const capH = FONT_SIZE * 0.74;
+  const lineTopOffset = (LINE_HEIGHT - capH) / 2;
+
+  // We need the Y of the LAST line
+  // Count lines by comparing text width vs container width
+  const containerW = scene.offsetWidth;
+  const textW = measure(committedText + (phase !== 'idle' ? ' ' + sweepWord : ''));
+
+  // Approximate which line we're on
+  const lineIndex = Math.floor(textW / containerW);
+  const lineY = relTop + lineIndex * LINE_HEIGHT + lineTopOffset - 2;
+
+  return { y: lineY, h: capH + 8 };
+}
 
 function syncCanvas() {
   canvas.width = scene.offsetWidth;
@@ -112,10 +144,22 @@ function drawFrame() {
   hue = (hue + 1.0) % 360;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const lineH = 30 * 1.5;
-  const capH = 30 * 0.72;
-  const top = (lineH - capH) / 2 - 2;
-  rectH = capH + 8; rectY = top;
+  const geo = getCursorGeometry();
+  const ry = geo.y;
+  const rh = geo.h;
+
+  // --- Cursor X: always end of committed text on current line ---
+  // We measure modulo line width for wrapping
+  const containerW = scene.offsetWidth;
+
+  function xOnLine(text) {
+    // Full pixel width of text, then mod by container for last-line x
+    sizer.textContent = text;
+    const full = sizer.offsetWidth;
+    return full % containerW;
+  }
+
+  const baseX = xOnLine(committedText);
 
   if (phase === 'expand') {
     rectW += (rectTargetW - rectW) * 0.15;
@@ -123,47 +167,58 @@ function drawFrame() {
   } else if (phase === 'sweep') {
     rectX += 4; rectW -= 4;
     if (rectW <= 3) {
+      // Word fully revealed
       rectW = 0; phase = 'idle';
-      lastFinalText += (lastFinalText ? ' ' : '') + sweepWord;
-      finalEl.textContent = lastFinalText;
-      interimEl.textContent = '';
+      committedText += (committedText ? ' ' : '') + sweepWord;
+      displayEl.textContent = committedText;
       tryNextWord();
     } else {
+      // Reveal partial word — show only what cursor has passed
       const frac = Math.max(0, 1 - rectW / sweepFull);
-      finalEl.textContent = lastFinalText + (lastFinalText ? ' ' : '') + sweepWord.slice(0, Math.ceil(sweepWord.length * frac));
+      const partial = sweepWord.slice(0, Math.ceil(sweepWord.length * frac));
+      displayEl.textContent = committedText + (committedText ? ' ' : '') + partial;
     }
   }
 
-  if (rectW > 0.5) {
-    const cright = rectX + rectW;
-    const bx = rectX + rectW / 2, by = rectY + rectH / 2;
+  // Compute current rect position based on committed text x
+  let cursorX;
+  if (phase === 'expand') {
+    cursorX = baseX + rectW;
+  } else if (phase === 'sweep') {
+    cursorX = rectX + rectW;
+  } else {
+    cursorX = baseX;
+  }
+
+  // Draw glow rect
+  if (rectW > 0.5 && (phase === 'expand' || phase === 'sweep')) {
+    const rx = cursorX - rectW;
+    const bx = rx + rectW / 2, by = ry + rh / 2;
+
+    // Bloom
     const bloom = ctx.createRadialGradient(bx, by, 0, bx, by, rectW + 30);
     bloom.addColorStop(0, `hsla(${hue},80%,70%,0.2)`);
     bloom.addColorStop(1, `hsla(${hue},80%,70%,0)`);
     ctx.beginPath();
-    ctx.ellipse(bx, by, rectW + 30, rectH + 20, 0, 0, Math.PI*2);
+    ctx.ellipse(bx, by, rectW + 30, rh + 20, 0, 0, Math.PI * 2);
     ctx.fillStyle = bloom; ctx.fill();
 
-    const grad = ctx.createLinearGradient(rectX, 0, cright, 0);
+    // Rect
+    const grad = ctx.createLinearGradient(rx, 0, cursorX, 0);
     grad.addColorStop(0, `hsla(${hue},80%,75%,0)`);
     grad.addColorStop(0.35, `hsla(${hue},80%,78%,0.45)`);
     grad.addColorStop(1, `hsla(${hue},80%,85%,0.85)`);
-    rRect(rectX, rectY, rectW, rectH, 4);
+    rRect(rx, ry, rectW, rh, 4);
     ctx.fillStyle = grad; ctx.fill();
-
-    ctx.save();
-    ctx.shadowColor = `hsl(${hue},90%,70%)`; ctx.shadowBlur = 10;
-    ctx.fillStyle = `hsl(${hue},90%,72%)`;
-    rRect(cright - 2.5, rectY, 2.5, rectH, 1.5); ctx.fill();
-    ctx.restore();
-  } else {
-    const tx = measure(finalEl.textContent + interimEl.textContent);
-    ctx.save();
-    ctx.shadowColor = `hsl(${hue},90%,70%)`; ctx.shadowBlur = 8;
-    ctx.fillStyle = `hsl(${hue},90%,72%)`;
-    rRect(tx + 1, rectY, 2.5, rectH, 1.5); ctx.fill();
-    ctx.restore();
   }
+
+  // Draw cursor bar — always at cursorX
+  ctx.save();
+  ctx.shadowColor = `hsl(${hue},90%,70%)`; ctx.shadowBlur = 10;
+  ctx.fillStyle = `hsl(${hue},90%,72%)`;
+  rRect(cursorX, ry, 2.5, rh, 1.5);
+  ctx.fill();
+  ctx.restore();
 
   requestAnimationFrame(drawFrame);
 }
@@ -171,71 +226,61 @@ function drawFrame() {
 function tryNextWord() {
   if (pendingWords.length === 0) return;
   sweepWord = pendingWords.shift();
-  const prefix = lastFinalText ? lastFinalText + ' ' : '';
   sweepFull = measure(sweepWord) + 2;
-  rectX = measure(prefix);
-  rectW = 0; rectTargetW = sweepFull;
+
+  // rectX starts at current end of committed text (on last line)
+  const containerW = scene.offsetWidth;
+  sizer.textContent = committedText;
+  const fullW = sizer.offsetWidth;
+  rectX = fullW % containerW + (committedText ? measure(' ') : 0);
+  rectW = 0;
+  rectTargetW = sweepFull;
   phase = 'expand';
 }
 
+// Only called with FINAL results — no interim shown
 function queueWords(transcript) {
   const incoming = transcript.trim().split(/\s+/).filter(Boolean);
-  // Only queue words we haven't committed or queued yet
-  const committed = lastFinalText.trim().split(/\s+/).filter(w => w);
-  const alreadyDone = committed.length + pendingWords.length + (phase !== 'idle' ? 1 : 0);
-  const newOnes = incoming.slice(alreadyDone);
-  newOnes.forEach(w => pendingWords.push(w));
+  // Figure out how many words are already handled
+  const committed = committedText.trim().split(/\s+/).filter(w => w.length > 0);
+  const alreadyHandled = committed.length + pendingWords.length + (phase !== 'idle' ? 1 : 0);
+  const newWords = incoming.slice(alreadyHandled);
+  newWords.forEach(w => pendingWords.push(w));
   if (phase === 'idle' && pendingWords.length > 0) tryNextWord();
 }
 
 function createRecog() {
   if (!SR) return null;
   const r = new SR();
-  r.continuous = false;      // single-shot — avoids permission loop on file://
-  r.interimResults = true;
+  r.continuous = false;
+  r.interimResults = false; // NO interim — only fire on final
   r.lang = 'en-US';
   r.maxAlternatives = 1;
 
-  r.onstart = () => {
-    restarting = false;
-    statusEl.textContent = 'listening...';
-  };
+  r.onstart = () => { restarting = false; statusEl.textContent = 'listening...'; };
 
   r.onresult = (e) => {
-    let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript;
       if (e.results[i].isFinal) {
-        queueWords(t);
-      } else {
-        interim = t;
+        queueWords(e.results[i][0].transcript);
       }
     }
-    interimEl.textContent = interim ? (lastFinalText ? ' ' : '') + interim : '';
   };
 
   r.onerror = (e) => {
-    if (e.error === 'no-speech') {
-      // silence — just restart quietly
-    } else if (e.error === 'not-allowed') {
+    if (e.error === 'not-allowed') {
       statusEl.textContent = 'mic blocked — allow in browser settings';
-      setMicOff(); return;
-    } else {
-      statusEl.textContent = 'error: ' + e.error;
+      setMicOff();
     }
+    // no-speech etc — just let onend restart
   };
 
   r.onend = () => {
-    interimEl.textContent = '';
     if (micOn && !restarting) {
       restarting = true;
-      // Small delay before restart to avoid hammering the permission dialog
       setTimeout(() => {
-        if (micOn) {
-          recog = createRecog();
-          recog.start();
-        }
-      }, 250);
+        if (micOn) { recog = createRecog(); recog.start(); }
+      }, 150);
     }
   };
 
@@ -243,7 +288,7 @@ function createRecog() {
 }
 
 function toggleMic() {
-  if (!SR) { statusEl.textContent = 'Use Chrome for Speech API'; return; }
+  if (!SR) { statusEl.textContent = 'Use Chrome'; return; }
   micOn ? setMicOff() : setMicOn();
 }
 
@@ -257,8 +302,7 @@ function setMicOn() {
 }
 
 function setMicOff() {
-  micOn = false;
-  restarting = false;
+  micOn = false; restarting = false;
   micBtn.classList.remove('on');
   lbl.textContent = 'Start speaking';
   statusEl.textContent = 'ready';
@@ -267,8 +311,8 @@ function setMicOff() {
 
 function clearAll() {
   setMicOff();
-  lastFinalText = ''; pendingWords = []; phase = 'idle'; rectW = 0;
-  finalEl.textContent = ''; interimEl.textContent = '';
+  committedText = ''; pendingWords = []; phase = 'idle'; rectW = 0;
+  displayEl.textContent = '';
 }
 
 syncCanvas();
