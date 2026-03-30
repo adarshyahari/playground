@@ -59,6 +59,11 @@
 @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
 #status { font-size:13px; color:#555; }
 #version { margin-top:0.75rem; font-size:11px; color:#333; letter-spacing:0.04em; }
+    #version a {
+    color: inherit; text-decoration: underline; text-underline-offset: 3px;
+    transition: color 0.15s; cursor: pointer;
+  }
+  #version a:hover { color: white; }
 #type-input-wrap { display:none; margin-top:1rem; width:100%; }
 #type-input-wrap.visible { display:block; }
 #type-input {
@@ -136,9 +141,6 @@
   #version {
     font-size: 12px;
     margin-top: 1rem;
-  }
-  #version a {
-    color: white;
   }
 }
 
