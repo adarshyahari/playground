@@ -24,7 +24,7 @@
   position: absolute; visibility: hidden;
   font-size: 30px; font-weight: 400;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-  letter-spacing: -0.01em; white-space: pre; top:0; left:0; z-index:0;
+  letter-spacing: -0.01em; white-space: pre; top:0; left:0;
 }
 #controls { margin-top: 1.5rem; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
 #mic-btn {
@@ -43,6 +43,7 @@
 #mic-btn.on .dot { background:#a855f7; animation: p 1s infinite; }
 @keyframes p { 0%,100%{opacity:1}50%{opacity:.3} }
 #status { font-size: 13px; color: #666; }
+#version { margin-top: 0.75rem; font-size: 11px; color: #333; letter-spacing: 0.04em; }
 </style>
 
 <div id="root">
@@ -58,6 +59,7 @@
     <button id="clear-btn" onclick="clearAll()">Clear</button>
     <span id="status">ready</span>
   </div>
+  <div id="version">v5.0</div>
 </div>
 
 <script>
@@ -75,50 +77,37 @@ if (!SR) statusEl.textContent = 'Not supported — use Chrome';
 
 let recog = null;
 let micOn = false;
-let restarting = false;
 
-// Text state — only what's fully revealed
-let committedText = '';
-// Queue of complete words waiting to animate
-let pendingWords = [];
+// Text state
+let committedText = '';   // fully animated & committed words
+let animatedCount = 0;    // how many words have been fully animated
+let pendingWords = [];    // words queued to animate next
 
-// Glow/cursor animation state
+// Track what we've already queued from interim to avoid re-queuing
+let interimQueued = [];   // words already sent to pending from current interim chunk
+let lastFinalCount = 0;   // word count after last final result
+
+// Glow/cursor animation
 let hue = 270;
-let phase = 'idle'; // idle | expand | sweep
+let phase = 'idle';
 let rectX = 0, rectW = 0, rectTargetW = 0;
 let sweepWord = '', sweepFull = 0;
 
-// Canvas geometry — computed from a reference char
 const FONT_SIZE = 30;
 const LINE_HEIGHT = FONT_SIZE * 1.5;
 
-function measure(t) {
-  sizer.textContent = t;
-  return sizer.offsetWidth;
-}
+function measure(t) { sizer.textContent = t; return sizer.offsetWidth; }
 
-// Get pixel Y of the current line's top and height for the cursor
-// We do this by measuring where the text currently sits
 function getCursorGeometry() {
-  // Use the bounding rect of displayEl relative to scene
   const sceneRect = scene.getBoundingClientRect();
   const textRect = displayEl.getBoundingClientRect();
   const relTop = textRect.top - sceneRect.top;
-
-  // Height of one line
   const capH = FONT_SIZE * 0.74;
   const lineTopOffset = (LINE_HEIGHT - capH) / 2;
-
-  // We need the Y of the LAST line
-  // Count lines by comparing text width vs container width
   const containerW = scene.offsetWidth;
   const textW = measure(committedText + (phase !== 'idle' ? ' ' + sweepWord : ''));
-
-  // Approximate which line we're on
   const lineIndex = Math.floor(textW / containerW);
-  const lineY = relTop + lineIndex * LINE_HEIGHT + lineTopOffset - 2;
-
-  return { y: lineY, h: capH + 8 };
+  return { y: relTop + lineIndex * LINE_HEIGHT + lineTopOffset - 2, h: capH + 8 };
 }
 
 function syncCanvas() {
@@ -129,34 +118,23 @@ function syncCanvas() {
 function rRect(x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
-  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-  ctx.lineTo(x+w,y+h-r);
-  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-  ctx.lineTo(x+r,y+h);
-  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-  ctx.lineTo(x,y+r);
-  ctx.quadraticCurveTo(x,y,x+r,y);
-  ctx.closePath();
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
 }
 
 function drawFrame() {
   syncCanvas();
-  hue = (hue + 1.0) % 360;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const geo = getCursorGeometry();
-  const ry = geo.y;
-  const rh = geo.h;
-
-  // --- Cursor X: always end of committed text on current line ---
-  // We measure modulo line width for wrapping
+  const ry = geo.y, rh = geo.h;
   const containerW = scene.offsetWidth;
 
   function xOnLine(text) {
-    // Full pixel width of text, then mod by container for last-line x
     sizer.textContent = text;
-    const full = sizer.offsetWidth;
-    return full % containerW;
+    return sizer.offsetWidth % containerW;
   }
 
   const baseX = xOnLine(committedText);
@@ -167,35 +145,27 @@ function drawFrame() {
   } else if (phase === 'sweep') {
     rectX += 4; rectW -= 4;
     if (rectW <= 3) {
-      // Word fully revealed
       rectW = 0; phase = 'idle';
       committedText += (committedText ? ' ' : '') + sweepWord;
+      animatedCount++;
       displayEl.textContent = committedText;
       tryNextWord();
     } else {
-      // Reveal partial word — show only what cursor has passed
       const frac = Math.max(0, 1 - rectW / sweepFull);
       const partial = sweepWord.slice(0, Math.ceil(sweepWord.length * frac));
       displayEl.textContent = committedText + (committedText ? ' ' : '') + partial;
     }
   }
 
-  // Compute current rect position based on committed text x
   let cursorX;
-  if (phase === 'expand') {
-    cursorX = baseX + rectW;
-  } else if (phase === 'sweep') {
-    cursorX = rectX + rectW;
-  } else {
-    cursorX = baseX;
-  }
+  if (phase === 'expand') cursorX = baseX + rectW;
+  else if (phase === 'sweep') cursorX = rectX + rectW;
+  else cursorX = baseX;
 
-  // Draw glow rect
-  if (rectW > 0.5 && (phase === 'expand' || phase === 'sweep')) {
+  // Glow rect
+  if (rectW > 0.5 && phase !== 'idle') {
     const rx = cursorX - rectW;
     const bx = rx + rectW / 2, by = ry + rh / 2;
-
-    // Bloom
     const bloom = ctx.createRadialGradient(bx, by, 0, bx, by, rectW + 30);
     bloom.addColorStop(0, `hsla(${hue},80%,70%,0.2)`);
     bloom.addColorStop(1, `hsla(${hue},80%,70%,0)`);
@@ -203,7 +173,6 @@ function drawFrame() {
     ctx.ellipse(bx, by, rectW + 30, rh + 20, 0, 0, Math.PI * 2);
     ctx.fillStyle = bloom; ctx.fill();
 
-    // Rect
     const grad = ctx.createLinearGradient(rx, 0, cursorX, 0);
     grad.addColorStop(0, `hsla(${hue},80%,75%,0)`);
     grad.addColorStop(0.35, `hsla(${hue},80%,78%,0.45)`);
@@ -212,10 +181,19 @@ function drawFrame() {
     ctx.fillStyle = grad; ctx.fill();
   }
 
-  // Draw cursor bar — always at cursorX
+  // Cursor bar — colored when active, grey when idle/off
+  const isActive = micOn && phase !== 'idle';
+  if (isActive) hue = (hue + 1.0) % 360;
+
   ctx.save();
-  ctx.shadowColor = `hsl(${hue},90%,70%)`; ctx.shadowBlur = 10;
-  ctx.fillStyle = `hsl(${hue},90%,72%)`;
+  if (isActive) {
+    ctx.shadowColor = `hsl(${hue},90%,70%)`;
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = `hsl(${hue},90%,72%)`;
+  } else {
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = micOn ? '#555' : '#333';
+  }
   rRect(cursorX, ry, 2.5, rh, 1.5);
   ctx.fill();
   ctx.restore();
@@ -227,64 +205,78 @@ function tryNextWord() {
   if (pendingWords.length === 0) return;
   sweepWord = pendingWords.shift();
   sweepFull = measure(sweepWord) + 2;
-
-  // rectX starts at current end of committed text (on last line)
   const containerW = scene.offsetWidth;
   sizer.textContent = committedText;
-  const fullW = sizer.offsetWidth;
-  rectX = fullW % containerW + (committedText ? measure(' ') : 0);
-  rectW = 0;
-  rectTargetW = sweepFull;
+  rectX = sizer.offsetWidth % containerW + (committedText ? measure(' ') : 0);
+  rectW = 0; rectTargetW = sweepFull;
   phase = 'expand';
 }
 
-// Only called with FINAL results — no interim shown
-function queueWords(transcript) {
-  const incoming = transcript.trim().split(/\s+/).filter(Boolean);
-  // Figure out how many words are already handled
-  const committed = committedText.trim().split(/\s+/).filter(w => w.length > 0);
-  const alreadyHandled = committed.length + pendingWords.length + (phase !== 'idle' ? 1 : 0);
-  const newWords = incoming.slice(alreadyHandled);
-  newWords.forEach(w => pendingWords.push(w));
+// Called with interim transcript — queue only NEW words we haven't queued yet
+function handleInterim(transcript) {
+  const words = transcript.trim().split(/\s+/).filter(Boolean);
+  // Words already handled = committed + interimQueued + currently animating
+  const alreadyHandled = lastFinalCount + interimQueued.length + (phase !== 'idle' ? 1 : 0) + pendingWords.length;
+  const newWords = words.slice(alreadyHandled);
+  if (newWords.length === 0) return;
+  newWords.forEach(w => { interimQueued.push(w); pendingWords.push(w); });
+  if (phase === 'idle') tryNextWord();
+}
+
+// Called when a result is finalised — reconcile committed count
+function handleFinal(transcript) {
+  const words = transcript.trim().split(/\s+/).filter(Boolean);
+  lastFinalCount = words.length;
+  // Any words beyond what interim already queued, add them
+  const totalQueued = interimQueued.length + (phase !== 'idle' ? 1 : 0) + pendingWords.length;
+  const alreadyHandled = lastFinalCount - words.length + totalQueued;
+  const newWords = words.slice(interimQueued.length + (phase !== 'idle' ? 1 : 0) + pendingWords.length + animatedCount - animatedCount);
+
+  // Simpler: just make sure all words in final are queued
+  const totalAnimated = animatedCount + (phase !== 'idle' ? 1 : 0) + pendingWords.length + interimQueued.length;
+  const missing = words.slice(totalAnimated);
+  missing.forEach(w => { pendingWords.push(w); });
+  interimQueued = [];
   if (phase === 'idle' && pendingWords.length > 0) tryNextWord();
 }
 
-function createRecog() {
-  if (!SR) return null;
-  const r = new SR();
-  r.continuous = false;
-  r.interimResults = false; // NO interim — only fire on final
-  r.lang = 'en-US';
-  r.maxAlternatives = 1;
+function startRecog() {
+  if (!SR || !micOn) return;
+  recog = new SR();
+  recog.continuous = true;
+  recog.interimResults = true;
+  recog.lang = 'en-US';
+  recog.maxAlternatives = 1;
 
-  r.onstart = () => { restarting = false; statusEl.textContent = 'listening...'; };
+  recog.onstart = () => { statusEl.textContent = 'listening...'; };
 
-  r.onresult = (e) => {
+  recog.onresult = (e) => {
     for (let i = e.resultIndex; i < e.results.length; i++) {
+      const transcript = e.results[i][0].transcript;
       if (e.results[i].isFinal) {
-        queueWords(e.results[i][0].transcript);
+        handleFinal(transcript);
+      } else {
+        handleInterim(transcript);
       }
     }
   };
 
-  r.onerror = (e) => {
+  recog.onerror = (e) => {
     if (e.error === 'not-allowed') {
       statusEl.textContent = 'mic blocked — allow in browser settings';
       setMicOff();
-    }
-    // no-speech etc — just let onend restart
-  };
-
-  r.onend = () => {
-    if (micOn && !restarting) {
-      restarting = true;
-      setTimeout(() => {
-        if (micOn) { recog = createRecog(); recog.start(); }
-      }, 150);
+    } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
+      // restart on recoverable errors
+      setTimeout(() => { if (micOn) startRecog(); }, 300);
     }
   };
 
-  return r;
+  recog.onend = () => {
+    // Only restart if we didn't explicitly stop
+    if (micOn) setTimeout(() => { if (micOn) startRecog(); }, 200);
+  };
+
+  try { recog.start(); } catch(e) {}
 }
 
 function toggleMic() {
@@ -293,25 +285,23 @@ function toggleMic() {
 }
 
 function setMicOn() {
-  micOn = true;
-  micBtn.classList.add('on');
-  lbl.textContent = 'Stop';
-  statusEl.textContent = 'starting...';
-  recog = createRecog();
-  recog.start();
+  micOn = true; micBtn.classList.add('on');
+  lbl.textContent = 'Stop'; statusEl.textContent = 'starting...';
+  lastFinalCount = 0; interimQueued = [];
+  startRecog();
 }
 
 function setMicOff() {
-  micOn = false; restarting = false;
-  micBtn.classList.remove('on');
-  lbl.textContent = 'Start speaking';
-  statusEl.textContent = 'ready';
-  if (recog) { try { recog.abort(); } catch(e){} recog = null; }
+  micOn = false; micBtn.classList.remove('on');
+  lbl.textContent = 'Start speaking'; statusEl.textContent = 'ready';
+  if (recog) { try { recog.onend = null; recog.abort(); } catch(e){} recog = null; }
 }
 
 function clearAll() {
   setMicOff();
-  committedText = ''; pendingWords = []; phase = 'idle'; rectW = 0;
+  committedText = ''; animatedCount = 0; pendingWords = [];
+  interimQueued = []; lastFinalCount = 0;
+  phase = 'idle'; rectW = 0;
   displayEl.textContent = '';
 }
 
