@@ -12,43 +12,37 @@
   padding: 2.5rem 3rem;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
 }
-#scene {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-#canvas {
-  position: absolute; top: 0; left: 0;
-  width: 100%; height: 100%;
-  pointer-events: none; z-index: 10;
-}
+#scene { position: relative; width: 100%; min-height: 60px; }
+#canvas { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
 #text-layer {
   font-size: 30px; font-weight: 400; color: #fff;
   line-height: 1.5; letter-spacing: -0.01em;
   white-space: pre-wrap; word-break: break-word;
   min-height: 46px; position: relative; z-index: 1;
-  visibility: visible;
 }
 #sizer {
   position: fixed; visibility: hidden; top: -9999px; left: -9999px;
-  font-size: 30px; font-weight: 400; line-height: 1.5;
+  font-size: 30px; font-weight: 400;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
   letter-spacing: -0.01em; white-space: pre;
 }
-#controls {
-  margin-top: 1.5rem; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+#ref-char {
+  position: fixed; visibility: hidden; top: -9999px; left: -9999px;
+  font-size: 30px; font-weight: 400; line-height: 1.5;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
 }
+#controls { margin-top: 1.5rem; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 #mic-btn {
   background: #1a1a1a; border: 0.5px solid #444; color: #fff;
   padding: 10px 20px; border-radius: 999px; font-size: 14px;
-  cursor: pointer; display: flex; align-items: center; gap: 8px;
+  cursor: pointer; display:flex; align-items:center; gap:8px;
 }
 #mic-btn:hover { background: #2a2a2a; }
 #mic-btn.on { border-color: #a855f7; color: #d8b4fe; }
 #type-btn {
   background: #1a1a1a; border: 0.5px solid #444; color: #fff;
   padding: 10px 20px; border-radius: 999px; font-size: 14px;
-  cursor: pointer; display: flex; align-items: center; gap: 8px;
+  cursor: pointer; display:flex; align-items:center; gap:8px;
 }
 #type-btn:hover { background: #2a2a2a; }
 #type-btn.on { border-color: #38bdf8; color: #7dd3fc; }
@@ -57,24 +51,22 @@
   padding: 10px 16px; border-radius: 999px; font-size: 14px; cursor: pointer;
 }
 #clear-btn:hover { border-color: #555; color: #888; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
-#mic-btn.on .dot { background: #a855f7; animation: pulse 1s infinite; }
-#type-btn.on .dot { background: #38bdf8; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-#status { font-size: 13px; color: #555; }
-#version { margin-top: 0.75rem; font-size: 11px; color: #333; letter-spacing: 0.04em; }
-#type-input-wrap {
-  display: none; margin-top: 1rem; width: 100%;
-}
-#type-input-wrap.visible { display: block; }
+.dot { width:8px; height:8px; border-radius:50%; background:#555; flex-shrink:0; }
+#mic-btn.on .dot { background:#a855f7; animation: pulse 1s infinite; }
+#type-btn.on .dot { background:#38bdf8; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
+#status { font-size:13px; color:#555; }
+#version { margin-top:0.75rem; font-size:11px; color:#333; letter-spacing:0.04em; }
+#type-input-wrap { display:none; margin-top:1rem; width:100%; }
+#type-input-wrap.visible { display:block; }
 #type-input {
-  background: #111; border: 0.5px solid #333; color: #fff;
-  padding: 10px 16px; border-radius: 8px; font-size: 16px;
-  width: 100%; outline: none;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  background:#111; border:0.5px solid #333; color:#fff;
+  padding:10px 16px; border-radius:8px; font-size:16px;
+  width:100%; outline:none;
+  font-family:-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
 }
-#type-input:focus { border-color: #38bdf8; }
-#type-hint { font-size: 12px; color: #444; margin-top: 6px; }
+#type-input:focus { border-color:#38bdf8; }
+#type-hint { font-size:12px; color:#444; margin-top:6px; }
 </style>
 
 <div id="root">
@@ -83,30 +75,26 @@
     <div id="text-layer"><span id="display-text"></span></div>
   </div>
   <div id="controls">
-    <button id="mic-btn" onclick="toggleMic()">
-      <span class="dot"></span>
-      <span id="mic-lbl">Speak</span>
-    </button>
-    <button id="type-btn" onclick="toggleType()">
-      <span class="dot"></span>
-      <span id="type-lbl">Type</span>
-    </button>
+    <button id="mic-btn" onclick="toggleMic()"><span class="dot"></span><span id="mic-lbl">Speak</span></button>
+    <button id="type-btn" onclick="toggleType()"><span class="dot"></span><span id="type-lbl">Type</span></button>
     <button id="clear-btn" onclick="clearAll()">Clear</button>
     <span id="status">ready</span>
   </div>
   <div id="type-input-wrap">
-    <input id="type-input" type="text" placeholder="Type here — space adds a word, backspace removes last word" autocomplete="off" />
-    <div id="type-hint">Space → reveal next word &nbsp;·&nbsp; Backspace → remove last word</div>
+    <input id="type-input" type="text" placeholder="Type here — space adds a word, backspace removes last" autocomplete="off" />
+    <div id="type-hint">Space / Enter → reveal word &nbsp;·&nbsp; Backspace on empty → erase last word</div>
   </div>
-  <div id="version">v6.0</div>
+  <div id="version">v11.0</div>
 </div>
 <span id="sizer"></span>
+<span id="ref-char">Ag</span>
 
 <script>
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const scene = document.getElementById('scene');
 const sizer = document.getElementById('sizer');
+const refChar = document.getElementById('ref-char');
 const displayEl = document.getElementById('display-text');
 const micBtn = document.getElementById('mic-btn');
 const typeBtn = document.getElementById('type-btn');
@@ -117,61 +105,47 @@ const typeInputWrap = document.getElementById('type-input-wrap');
 const typeInput = document.getElementById('type-input');
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) statusEl.textContent = 'Not supported — use Chrome';
 
 let recog = null;
 let micOn = false;
 let typeOn = false;
 
-let committedText = '';
 let committedWords = [];
 let pendingWords = [];
-let animatedCount = 0;
 let interimQueued = [];
 let lastFinalWordCount = 0;
 
 let hue = 270;
 let phase = 'idle';
-let rectX = 0, rectW = 0, rectTargetW = 0;
-let sweepWord = '', sweepFull = 0;
 
-const FS = 30;
-const LH = FS * 1.5;
+let fwdStartX = 0, fwdWord = '', fwdWordW = 0, fwdRectW = 0, fwdSweepX = 0;
+let erWord = '', erWordW = 0, erRightX = 0, erLeftX = 0, erCursorX = 0;
 
-function measure(t) {
-  sizer.textContent = t;
-  return sizer.getBoundingClientRect().width;
-}
+const FS = 30, LH = FS * 1.5, SPEED = 5;
+
+function measure(t) { sizer.textContent = t; return sizer.getBoundingClientRect().width; }
+function getCharH() { return refChar.getBoundingClientRect().height; }
 
 function syncCanvas() {
-  const r = scene.getBoundingClientRect();
-  canvas.width = r.width;
+  canvas.width = scene.offsetWidth;
   canvas.height = Math.max(scene.offsetHeight, LH + 20);
 }
 
-function getCursorPos() {
-  // Measure all text that should be visible (committed + partial sweep)
-  const textSoFar = displayEl.textContent || '';
-  const containerW = canvas.width;
-  if (containerW === 0) return { x: 0, y: 8 };
-
-  // Use a temporary span inside the text layer to find exact caret position
-  // We'll measure line by line
-  const totalW = measure(textSoFar);
-  const lineIdx = Math.floor(totalW / containerW);
-  const xOnLine = totalW - lineIdx * containerW;
-
-  // Y: top of text layer relative to canvas top, plus line offset
+function posFromText(txt) {
+  const cw = canvas.width || 1;
   const sceneRect = scene.getBoundingClientRect();
   const textRect = displayEl.getBoundingClientRect();
   const textTop = textRect.top - sceneRect.top;
-
-  const capH = FS * 0.72;
-  const y = textTop + lineIdx * LH + (LH - capH) / 2 - 1;
-
-  return { x: xOnLine, y, h: capH + 6 };
+  const charH = getCharH();
+  const w = measure(txt);
+  const line = Math.floor(w / cw);
+  return { x: w - line * cw, y: textTop + line * LH + (LH - charH) / 2, h: charH };
 }
 
 function rRect(x, y, w, h, r) {
+  if (w <= 0) return;
+  r = Math.min(r, w/2, h/2);
   ctx.beginPath();
   ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
   ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h-r);
@@ -180,94 +154,140 @@ function rRect(x, y, w, h, r) {
   ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
 }
 
-const isListening = () => micOn || typeOn;
+function drawColorRect(rx, ry, rw, rh, gradDir) {
+  if (rw < 1) return;
+  const bx = rx+rw/2, by = ry+rh/2;
+  const bloom = ctx.createRadialGradient(bx,by,0,bx,by,rw+28);
+  bloom.addColorStop(0,`hsla(${hue},80%,70%,0.2)`);
+  bloom.addColorStop(1,`hsla(${hue},80%,70%,0)`);
+  ctx.beginPath(); ctx.ellipse(bx,by,rw+28,rh+20,0,0,Math.PI*2);
+  ctx.fillStyle=bloom; ctx.fill();
+  const x0=gradDir==='right'?rx:rx+rw, x1=gradDir==='right'?rx+rw:rx;
+  const grad=ctx.createLinearGradient(x0,0,x1,0);
+  grad.addColorStop(0,`hsla(${hue},80%,75%,0)`);
+  grad.addColorStop(0.3,`hsla(${hue},80%,78%,0.45)`);
+  grad.addColorStop(1,`hsla(${hue},80%,85%,0.88)`);
+  rRect(rx,ry,rw,rh,4); ctx.fillStyle=grad; ctx.fill();
+}
+
+function drawWhiteRect(rx, ry, rw, rh, gradDir) {
+  if (rw < 1) return;
+  const bx = rx+rw/2, by = ry+rh/2;
+  const bloom = ctx.createRadialGradient(bx,by,0,bx,by,rw+32);
+  bloom.addColorStop(0,'rgba(255,255,255,0.18)');
+  bloom.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.beginPath(); ctx.ellipse(bx,by,rw+32,rh+22,0,0,Math.PI*2);
+  ctx.fillStyle=bloom; ctx.fill();
+  const x0=gradDir==='left'?rx+rw:rx, x1=gradDir==='left'?rx:rx+rw;
+  const grad=ctx.createLinearGradient(x0,0,x1,0);
+  grad.addColorStop(0,'rgba(255,255,255,0)');
+  grad.addColorStop(0.3,'rgba(255,255,255,0.35)');
+  grad.addColorStop(1,'rgba(255,255,255,0.82)');
+  rRect(rx,ry,rw,rh,4); ctx.fillStyle=grad; ctx.fill();
+}
+
+function drawColorCursor(x, y, h) {
+  ctx.save();
+  const active = phase !== 'idle';
+  const listening = micOn || typeOn;
+  if (!listening && !active) {
+    ctx.fillStyle='#2a2a2a'; ctx.shadowBlur=0;
+  } else if (active) {
+    hue=(hue+1.2)%360;
+    ctx.fillStyle=`hsl(${hue},90%,72%)`;
+    ctx.shadowColor=`hsl(${hue},90%,70%)`; ctx.shadowBlur=12;
+  } else {
+    hue=(hue+0.5)%360;
+    ctx.fillStyle=`hsl(${hue},70%,58%)`;
+    ctx.shadowColor=`hsl(${hue},70%,58%)`; ctx.shadowBlur=5;
+  }
+  rRect(x,y,2.5,h,1.5); ctx.fill(); ctx.restore();
+}
+
+function drawWhiteCursor(x, y, h) {
+  ctx.save();
+  ctx.fillStyle='rgba(255,255,255,0.95)';
+  ctx.shadowColor='rgba(255,255,255,0.8)';
+  ctx.shadowBlur=14;
+  rRect(x,y,2.5,h,1.5); ctx.fill(); ctx.restore();
+}
+
+function committedStr() { return committedWords.join(' '); }
 
 function drawFrame() {
   syncCanvas();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
   if (phase === 'expand') {
-    rectW += (rectTargetW - rectW) * 0.15;
-    if (rectTargetW - rectW < 0.8) { rectW = rectTargetW; phase = 'sweep'; }
+    fwdRectW += (fwdWordW - fwdRectW) * 0.15;
+    if (fwdWordW - fwdRectW < 0.8) { fwdRectW = fwdWordW; phase = 'sweep'; fwdSweepX = fwdStartX; }
+    const pos = posFromText(committedStr());
+    drawColorRect(fwdStartX, pos.y, fwdRectW, pos.h, 'right');
+    drawColorCursor(fwdStartX + fwdRectW, pos.y, pos.h);
+
   } else if (phase === 'sweep') {
-    rectX += 4; rectW -= 4;
-    if (rectW <= 3) {
-      rectW = 0; phase = 'idle';
-      committedWords.push(sweepWord);
-      committedText = committedWords.join(' ');
-      animatedCount++;
-      displayEl.textContent = committedText;
+    fwdSweepX += SPEED;
+    const remaining = (fwdStartX + fwdWordW) - fwdSweepX;
+    if (remaining <= 2) {
+      phase = 'idle';
+      committedWords.push(fwdWord);
+      displayEl.textContent = committedStr();
       tryNextWord();
     } else {
-      const frac = Math.max(0, 1 - rectW / sweepFull);
-      const partial = sweepWord.slice(0, Math.ceil(sweepWord.length * frac));
-      displayEl.textContent = committedText + (committedText ? ' ' : '') + partial;
+      const frac = 1 - remaining / fwdWordW;
+      const partial = fwdWord.slice(0, Math.ceil(fwdWord.length * frac));
+      const prefix = committedStr();
+      displayEl.textContent = prefix + (prefix ? ' ' : '') + partial;
+      const pos = posFromText(displayEl.textContent);
+      drawColorRect(fwdSweepX, pos.y, remaining, pos.h, 'right');
+      drawColorCursor(fwdSweepX + remaining, pos.y, pos.h);
     }
-  }
 
-  const pos = getCursorPos();
-  const ry = pos.y, rh = pos.h;
+  } else if (phase === 'erase_cover') {
+    // White cursor moves left covering the word
+    erCursorX -= SPEED * 1.2;
+    if (erCursorX <= erLeftX) { erCursorX = erLeftX; phase = 'erase_wipe'; }
+    const rw = erRightX - erCursorX;
+    const pos = posFromText(committedStr());
+    drawWhiteRect(erCursorX, pos.y, rw, pos.h, 'left');
+    drawWhiteCursor(erCursorX, pos.y, pos.h);
 
-  let cursorX;
-  if (phase === 'expand') cursorX = pos.x;
-  else if (phase === 'sweep') cursorX = pos.x;
-  else cursorX = pos.x;
+  } else if (phase === 'erase_wipe') {
+    // Right edge sweeps left — NO cursor bar, just the rect erasing
+    erRightX -= SPEED * 1.2;
+    const remaining = erRightX - erLeftX;
+    if (remaining <= 2) {
+      committedWords.pop();
+      displayEl.textContent = committedStr();
+      phase = 'idle';
+      tryNextWord();
+    } else {
+      const frac = remaining / erWordW;
+      const charsLeft = Math.ceil(erWord.length * frac);
+      const partial = erWord.slice(0, charsLeft);
+      const before = committedWords.slice(0,-1).join(' ');
+      displayEl.textContent = before + (before ? ' ' : '') + partial;
+      const pos = posFromText(displayEl.textContent);
+      drawWhiteRect(erLeftX, pos.y, remaining, pos.h, 'left');
+      // no cursor drawn here — transparent
+    }
 
-  // Glow rect
-  if (rectW > 0.5 && phase !== 'idle') {
-    const rx = cursorX - rectW;
-    const bx = rx + rectW / 2, by = ry + rh / 2;
-    const bloom = ctx.createRadialGradient(bx, by, 0, bx, by, rectW + 30);
-    bloom.addColorStop(0, `hsla(${hue},80%,70%,0.22)`);
-    bloom.addColorStop(1, `hsla(${hue},80%,70%,0)`);
-    ctx.beginPath();
-    ctx.ellipse(bx, by, rectW + 30, rh + 22, 0, 0, Math.PI * 2);
-    ctx.fillStyle = bloom; ctx.fill();
-
-    const grad = ctx.createLinearGradient(rx, 0, cursorX, 0);
-    grad.addColorStop(0, `hsla(${hue},80%,75%,0)`);
-    grad.addColorStop(0.3, `hsla(${hue},80%,78%,0.45)`);
-    grad.addColorStop(1, `hsla(${hue},80%,85%,0.88)`);
-    rRect(rx, ry, rectW, rh, 4);
-    ctx.fillStyle = grad; ctx.fill();
-  }
-
-  // Cursor bar
-  ctx.save();
-  if (!isListening()) {
-    // Inactive — plain grey, no glow
-    ctx.fillStyle = '#2a2a2a';
-    ctx.shadowBlur = 0;
-  } else if (phase !== 'idle') {
-    // Animating — full color glow
-    hue = (hue + 1.2) % 360;
-    ctx.fillStyle = `hsl(${hue},90%,72%)`;
-    ctx.shadowColor = `hsl(${hue},90%,70%)`;
-    ctx.shadowBlur = 12;
   } else {
-    // Listening but idle — soft color shift, gentle glow
-    hue = (hue + 0.6) % 360;
-    ctx.fillStyle = `hsl(${hue},70%,60%)`;
-    ctx.shadowColor = `hsl(${hue},70%,60%)`;
-    ctx.shadowBlur = 6;
+    const pos = posFromText(committedStr());
+    drawColorCursor(pos.x, pos.y, pos.h);
   }
-  rRect(cursorX, ry, 2.5, rh, 1.5);
-  ctx.fill();
-  ctx.restore();
 
   requestAnimationFrame(drawFrame);
 }
 
 function tryNextWord() {
   if (pendingWords.length === 0) return;
-  sweepWord = pendingWords.shift();
-  sweepFull = measure(sweepWord) + 2;
-  const containerW = canvas.width;
-  const baseW = measure(committedText);
-  const spaceW = committedText ? measure(' ') : 0;
-  rectX = (baseW + spaceW) % containerW;
-  rectW = 0; rectTargetW = sweepFull;
-  phase = 'expand';
+  fwdWord = pendingWords.shift();
+  fwdWordW = measure(fwdWord) + 2;
+  const base = committedStr();
+  const spaceW = base ? measure(' ') : 0;
+  fwdStartX = (measure(base) + spaceW) % (canvas.width || 1);
+  fwdRectW = 0; phase = 'expand';
 }
 
 function queueWord(word) {
@@ -276,129 +296,101 @@ function queueWord(word) {
   if (phase === 'idle') tryNextWord();
 }
 
-// ── Voice ──────────────────────────────────────────────
+function triggerErase() {
+  if (phase === 'expand' || phase === 'sweep') {
+    displayEl.textContent = committedStr();
+    pendingWords = []; phase = 'idle'; fwdRectW = 0;
+  }
+  if (committedWords.length === 0) return;
+  erWord = committedWords[committedWords.length - 1];
+  const before = committedWords.slice(0,-1).join(' ');
+  erWordW = measure(erWord);
+  const cw = canvas.width || 1;
+  const beforeW = measure(before);
+  const spaceW = before ? measure(' ') : 0;
+  erLeftX = (beforeW + spaceW) % cw;
+  erRightX = erLeftX + erWordW;
+  erCursorX = erRightX;
+  phase = 'erase_cover';
+}
+
 function handleInterim(transcript) {
   const words = transcript.trim().split(/\s+/).filter(Boolean);
   const handled = lastFinalWordCount + interimQueued.length + (phase !== 'idle' ? 1 : 0) + pendingWords.length;
-  const newOnes = words.slice(handled);
-  newOnes.forEach(w => { interimQueued.push(w); queueWord(w); });
+  words.slice(handled).forEach(w => { interimQueued.push(w); queueWord(w); });
 }
-
 function handleFinal(transcript) {
   const words = transcript.trim().split(/\s+/).filter(Boolean);
   lastFinalWordCount += words.length;
-  // Queue any words final has that interim missed
-  const handled = animatedCount + (phase !== 'idle' ? 1 : 0) + pendingWords.length + interimQueued.length;
-  words.slice(handled - animatedCount).forEach(w => queueWord(w));
+  const handled = committedWords.length + (phase !== 'idle' ? 1 : 0) + pendingWords.length + interimQueued.length;
+  words.slice(handled - committedWords.length).forEach(w => queueWord(w));
   interimQueued = [];
 }
-
 function startRecog() {
   if (!SR || !micOn) return;
   recog = new SR();
-  recog.continuous = true;
-  recog.interimResults = true;
-  recog.lang = 'en-US';
-
+  recog.continuous = true; recog.interimResults = true; recog.lang = 'en-US';
   recog.onstart = () => statusEl.textContent = 'listening...';
   recog.onresult = (e) => {
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const t = e.results[i][0].transcript;
-      if (e.results[i].isFinal) handleFinal(t);
-      else handleInterim(t);
+      if (e.results[i].isFinal) handleFinal(t); else handleInterim(t);
     }
   };
-  recog.onerror = (e) => {
-    if (e.error === 'not-allowed') { statusEl.textContent = 'mic blocked'; setMicOff(); }
-  };
+  recog.onerror = (e) => { if (e.error==='not-allowed') { statusEl.textContent='mic blocked'; setMicOff(); } };
   recog.onend = () => { if (micOn) setTimeout(startRecog, 200); };
   try { recog.start(); } catch(e) {}
 }
-
 function toggleMic() {
-  if (!SR) { statusEl.textContent = 'Use Chrome'; return; }
+  if (!SR) { statusEl.textContent='Use Chrome'; return; }
   if (typeOn) setTypeOff();
   micOn ? setMicOff() : setMicOn();
 }
-
 function setMicOn() {
-  micOn = true; micBtn.classList.add('on'); micLbl.textContent = 'Stop';
-  statusEl.textContent = 'starting...';
-  lastFinalWordCount = 0; interimQueued = [];
+  micOn=true; micBtn.classList.add('on'); micLbl.textContent='Stop';
+  statusEl.textContent='starting...'; lastFinalWordCount=0; interimQueued=[];
   startRecog();
 }
-
 function setMicOff() {
-  micOn = false; micBtn.classList.remove('on'); micLbl.textContent = 'Speak';
-  statusEl.textContent = 'ready';
-  if (recog) { try { recog.onend = null; recog.abort(); } catch(e){} recog = null; }
+  micOn=false; micBtn.classList.remove('on'); micLbl.textContent='Speak';
+  statusEl.textContent='ready';
+  if (recog) { try { recog.onend=null; recog.abort(); } catch(e){} recog=null; }
 }
-
-// ── Typing ─────────────────────────────────────────────
 function toggleType() {
   if (micOn) setMicOff();
   typeOn ? setTypeOff() : setTypeOn();
 }
-
 function setTypeOn() {
-  typeOn = true; typeBtn.classList.add('on'); typeLbl.textContent = 'Done';
-  statusEl.textContent = 'type mode';
+  typeOn=true; typeBtn.classList.add('on'); typeLbl.textContent='Done';
+  statusEl.textContent='type mode';
   typeInputWrap.classList.add('visible');
-  typeInput.value = '';
-  typeInput.focus();
+  typeInput.value=''; typeInput.focus();
 }
-
 function setTypeOff() {
-  typeOn = false; typeBtn.classList.remove('on'); typeLbl.textContent = 'Type';
-  statusEl.textContent = 'ready';
-  typeInputWrap.classList.remove('visible');
-  typeInput.value = '';
+  typeOn=false; typeBtn.classList.remove('on'); typeLbl.textContent='Type';
+  statusEl.textContent='ready';
+  typeInputWrap.classList.remove('visible'); typeInput.value='';
 }
-
-// Typing input logic — intercept space and backspace
 typeInput.addEventListener('keydown', (e) => {
-  if (e.key === ' ' || e.key === 'Spacebar') {
+  if (e.key===' '||e.key==='Spacebar') {
     e.preventDefault();
     const word = typeInput.value.trim();
-    if (word) { queueWord(word); typeInput.value = ''; }
-  } else if (e.key === 'Backspace' && typeInput.value === '') {
+    if (word) { queueWord(word); typeInput.value=''; }
+  } else if (e.key==='Backspace' && typeInput.value==='') {
     e.preventDefault();
-    removeLastWord();
-  } else if (e.key === 'Enter') {
+    if (pendingWords.length > 0) { pendingWords.pop(); return; }
+    triggerErase();
+  } else if (e.key==='Enter') {
     e.preventDefault();
     const word = typeInput.value.trim();
-    if (word) { queueWord(word); typeInput.value = ''; }
+    if (word) { queueWord(word); typeInput.value=''; }
   }
 });
-
-function removeLastWord() {
-  // Cancel any in-progress animation and remove last word
-  if (phase !== 'idle') {
-    // Cancel current sweep
-    phase = 'idle'; rectW = 0;
-    displayEl.textContent = committedText;
-    pendingWords = [];
-    return;
-  }
-  if (pendingWords.length > 0) {
-    pendingWords.pop(); return;
-  }
-  if (committedWords.length > 0) {
-    committedWords.pop();
-    committedText = committedWords.join(' ');
-    animatedCount = committedWords.length;
-    displayEl.textContent = committedText;
-  }
-}
-
-// ── Clear ──────────────────────────────────────────────
 function clearAll() {
   setMicOff(); setTypeOff();
-  committedText = ''; committedWords = []; pendingWords = [];
-  interimQueued = []; lastFinalWordCount = 0;
-  animatedCount = 0; phase = 'idle'; rectW = 0;
-  displayEl.textContent = '';
-  statusEl.textContent = 'ready';
+  committedWords=[]; pendingWords=[]; interimQueued=[];
+  lastFinalWordCount=0; phase='idle'; fwdRectW=0;
+  displayEl.textContent=''; statusEl.textContent='ready';
 }
 
 syncCanvas();
