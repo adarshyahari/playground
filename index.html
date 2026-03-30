@@ -12,7 +12,7 @@
   padding: 2.5rem 3rem;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
 }
-#scene { position: relative; width: 100%; min-height: 60px; height: 100vh;}
+#scene { position: relative; width: 100%; height: 100vh; min-height: 60px; }
 #canvas { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
 #text-layer {
   font-size: 30px; font-weight: 400; color: #fff;
@@ -25,11 +25,6 @@
   font-size: 30px; font-weight: 400;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
   letter-spacing: -0.01em; white-space: pre;
-}
-#ref-char {
-  position: fixed; visibility: hidden; top: -9999px; left: -9999px;
-  font-size: 30px; font-weight: 400; line-height: 1.5;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
 }
 #controls { margin-top: 1.5rem; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 #mic-btn {
@@ -72,7 +67,7 @@
 <div id="root">
   <div id="scene">
     <canvas id="canvas"></canvas>
-    <div id="text-layer"><span id="display-text"></span></div>
+    <div id="text-layer"><span id="display-text"></span><span id="caret-anchor">&#8203;</span></div>
   </div>
   <div id="controls">
     <button id="mic-btn" onclick="toggleMic()"><span class="dot"></span><span id="mic-lbl">Speak</span></button>
@@ -84,18 +79,17 @@
     <input id="type-input" type="text" placeholder="Type here — space adds a word, backspace removes last" autocomplete="off" />
     <div id="type-hint">Space / Enter → reveal word &nbsp;·&nbsp; Backspace on empty → erase last word</div>
   </div>
-  <div id="version">v11.0</div>
+  <div id="version">v13.0</div>
 </div>
 <span id="sizer"></span>
-<span id="ref-char">Ag</span>
 
 <script>
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const scene = document.getElementById('scene');
 const sizer = document.getElementById('sizer');
-const refChar = document.getElementById('ref-char');
 const displayEl = document.getElementById('display-text');
+const caretAnchor = document.getElementById('caret-anchor');
 const micBtn = document.getElementById('mic-btn');
 const typeBtn = document.getElementById('type-btn');
 const micLbl = document.getElementById('mic-lbl');
@@ -107,40 +101,43 @@ const typeInput = document.getElementById('type-input');
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (!SR) statusEl.textContent = 'Not supported — use Chrome';
 
-let recog = null;
-let micOn = false;
-let typeOn = false;
-
-let committedWords = [];
-let pendingWords = [];
-let interimQueued = [];
+let recog = null, micOn = false, typeOn = false;
+let committedWords = [], pendingWords = [], interimQueued = [];
 let lastFinalWordCount = 0;
-
 let hue = 270;
 let phase = 'idle';
 
-let fwdStartX = 0, fwdWord = '', fwdWordW = 0, fwdRectW = 0, fwdSweepX = 0;
-let erWord = '', erWordW = 0, erRightX = 0, erLeftX = 0, erCursorX = 0;
+let fwdStartX = 0, fwdStartY = 0, fwdWord = '', fwdWordW = 0, fwdRectW = 0, fwdSweepX = 0;
+let erWord = '', erWordW = 0, erRightX = 0, erLeftX = 0, erCursorX = 0, erY = 0, erH = 0;
 
 const FS = 30, LH = FS * 1.5, SPEED = 5;
 
 function measure(t) { sizer.textContent = t; return sizer.getBoundingClientRect().width; }
-function getCharH() { return refChar.getBoundingClientRect().height; }
 
 function syncCanvas() {
   canvas.width = scene.offsetWidth;
   canvas.height = Math.max(scene.offsetHeight, LH + 20);
 }
 
-function posFromText(txt) {
-  const cw = canvas.width || 1;
+// Key insight: caret-anchor contains a zero-width space so it has real line height.
+// Its getBoundingClientRect gives us top/height of the current line accurately.
+function getCaretPos() {
   const sceneRect = scene.getBoundingClientRect();
-  const textRect = displayEl.getBoundingClientRect();
-  const textTop = textRect.top - sceneRect.top;
-  const charH = getCharH();
-  const w = measure(txt);
-  const line = Math.floor(w / cw);
-  return { x: w - line * cw, y: textTop + line * LH + (LH - charH) / 2, h: charH };
+  const r = caretAnchor.getBoundingClientRect();
+  return {
+    x: r.left - sceneRect.left,
+    y: r.top - sceneRect.top,
+    h: r.height
+  };
+}
+
+function posForText(txt) {
+  const prev = displayEl.textContent;
+  displayEl.textContent = txt;
+  // Force layout read
+  const pos = getCaretPos();
+  displayEl.textContent = prev;
+  return pos;
 }
 
 function rRect(x, y, w, h, r) {
@@ -156,8 +153,8 @@ function rRect(x, y, w, h, r) {
 
 function drawColorRect(rx, ry, rw, rh, gradDir) {
   if (rw < 1) return;
-  const bx = rx+rw/2, by = ry+rh/2;
-  const bloom = ctx.createRadialGradient(bx,by,0,bx,by,rw+28);
+  const bx=rx+rw/2, by=ry+rh/2;
+  const bloom=ctx.createRadialGradient(bx,by,0,bx,by,rw+28);
   bloom.addColorStop(0,`hsla(${hue},80%,70%,0.2)`);
   bloom.addColorStop(1,`hsla(${hue},80%,70%,0)`);
   ctx.beginPath(); ctx.ellipse(bx,by,rw+28,rh+20,0,0,Math.PI*2);
@@ -172,8 +169,8 @@ function drawColorRect(rx, ry, rw, rh, gradDir) {
 
 function drawWhiteRect(rx, ry, rw, rh, gradDir) {
   if (rw < 1) return;
-  const bx = rx+rw/2, by = ry+rh/2;
-  const bloom = ctx.createRadialGradient(bx,by,0,bx,by,rw+32);
+  const bx=rx+rw/2, by=ry+rh/2;
+  const bloom=ctx.createRadialGradient(bx,by,0,bx,by,rw+32);
   bloom.addColorStop(0,'rgba(255,255,255,0.18)');
   bloom.addColorStop(1,'rgba(255,255,255,0)');
   ctx.beginPath(); ctx.ellipse(bx,by,rw+32,rh+22,0,0,Math.PI*2);
@@ -201,15 +198,14 @@ function drawColorCursor(x, y, h) {
     ctx.fillStyle=`hsl(${hue},70%,58%)`;
     ctx.shadowColor=`hsl(${hue},70%,58%)`; ctx.shadowBlur=5;
   }
-  rRect(x,y,2.5,h,1.5); ctx.fill(); ctx.restore();
+  rRect(x, y, 2.5, h, 1.5); ctx.fill(); ctx.restore();
 }
 
 function drawWhiteCursor(x, y, h) {
   ctx.save();
   ctx.fillStyle='rgba(255,255,255,0.95)';
-  ctx.shadowColor='rgba(255,255,255,0.8)';
-  ctx.shadowBlur=14;
-  rRect(x,y,2.5,h,1.5); ctx.fill(); ctx.restore();
+  ctx.shadowColor='rgba(255,255,255,0.8)'; ctx.shadowBlur=14;
+  rRect(x, y, 2.5, h, 1.5); ctx.fill(); ctx.restore();
 }
 
 function committedStr() { return committedWords.join(' '); }
@@ -221,9 +217,9 @@ function drawFrame() {
   if (phase === 'expand') {
     fwdRectW += (fwdWordW - fwdRectW) * 0.15;
     if (fwdWordW - fwdRectW < 0.8) { fwdRectW = fwdWordW; phase = 'sweep'; fwdSweepX = fwdStartX; }
-    const pos = posFromText(committedStr());
-    drawColorRect(fwdStartX, pos.y, fwdRectW, pos.h, 'right');
-    drawColorCursor(fwdStartX + fwdRectW, pos.y, pos.h);
+    const pos = getCaretPos();
+    drawColorRect(fwdStartX, fwdStartY, fwdRectW, pos.h, 'right');
+    drawColorCursor(fwdStartX + fwdRectW, fwdStartY, pos.h);
 
   } else if (phase === 'sweep') {
     fwdSweepX += SPEED;
@@ -238,22 +234,19 @@ function drawFrame() {
       const partial = fwdWord.slice(0, Math.ceil(fwdWord.length * frac));
       const prefix = committedStr();
       displayEl.textContent = prefix + (prefix ? ' ' : '') + partial;
-      const pos = posFromText(displayEl.textContent);
-      drawColorRect(fwdSweepX, pos.y, remaining, pos.h, 'right');
-      drawColorCursor(fwdSweepX + remaining, pos.y, pos.h);
+      const pos = getCaretPos();
+      drawColorRect(fwdSweepX, fwdStartY, remaining, pos.h, 'right');
+      drawColorCursor(fwdSweepX + remaining, fwdStartY, pos.h);
     }
 
   } else if (phase === 'erase_cover') {
-    // White cursor moves left covering the word
     erCursorX -= SPEED * 1.2;
     if (erCursorX <= erLeftX) { erCursorX = erLeftX; phase = 'erase_wipe'; }
     const rw = erRightX - erCursorX;
-    const pos = posFromText(committedStr());
-    drawWhiteRect(erCursorX, pos.y, rw, pos.h, 'left');
-    drawWhiteCursor(erCursorX, pos.y, pos.h);
+    drawWhiteRect(erCursorX, erY, rw, erH, 'left');
+    drawWhiteCursor(erCursorX, erY, erH);
 
   } else if (phase === 'erase_wipe') {
-    // Right edge sweeps left — NO cursor bar, just the rect erasing
     erRightX -= SPEED * 1.2;
     const remaining = erRightX - erLeftX;
     if (remaining <= 2) {
@@ -267,13 +260,11 @@ function drawFrame() {
       const partial = erWord.slice(0, charsLeft);
       const before = committedWords.slice(0,-1).join(' ');
       displayEl.textContent = before + (before ? ' ' : '') + partial;
-      const pos = posFromText(displayEl.textContent);
-      drawWhiteRect(erLeftX, pos.y, remaining, pos.h, 'left');
-      // no cursor drawn here — transparent
+      drawWhiteRect(erLeftX, erY, remaining, erH, 'left');
     }
 
   } else {
-    const pos = posFromText(committedStr());
+    const pos = getCaretPos();
     drawColorCursor(pos.x, pos.y, pos.h);
   }
 
@@ -284,10 +275,11 @@ function tryNextWord() {
   if (pendingWords.length === 0) return;
   fwdWord = pendingWords.shift();
   fwdWordW = measure(fwdWord) + 2;
-  const base = committedStr();
-  const spaceW = base ? measure(' ') : 0;
-  fwdStartX = (measure(base) + spaceW) % (canvas.width || 1);
-  fwdRectW = 0; phase = 'expand';
+  const pos = getCaretPos();
+  fwdStartX = pos.x;
+  fwdStartY = pos.y;
+  fwdRectW = 0;
+  phase = 'expand';
 }
 
 function queueWord(word) {
@@ -302,14 +294,26 @@ function triggerErase() {
     pendingWords = []; phase = 'idle'; fwdRectW = 0;
   }
   if (committedWords.length === 0) return;
+
   erWord = committedWords[committedWords.length - 1];
   const before = committedWords.slice(0,-1).join(' ');
-  erWordW = measure(erWord);
-  const cw = canvas.width || 1;
-  const beforeW = measure(before);
-  const spaceW = before ? measure(' ') : 0;
-  erLeftX = (beforeW + spaceW) % cw;
-  erRightX = erLeftX + erWordW;
+
+  // Right edge: true caret pos at end of full committed text
+  const rightPos = getCaretPos();
+  erRightX = rightPos.x;
+  erY = rightPos.y;
+  erH = rightPos.h;
+
+  // Left edge: caret pos after text before last word (+ space)
+  const leftPos = posForText(before + (before ? ' ' : ''));
+  erLeftX = leftPos.x;
+
+  // If word wrapped to new line, erLeftX may be > erRightX — use measured width as fallback
+  erWordW = (erRightX > erLeftX) ? (erRightX - erLeftX) : measure(erWord);
+  if (erRightX <= erLeftX) {
+    erLeftX = erRightX - erWordW;
+  }
+
   erCursorX = erRightX;
   phase = 'erase_cover';
 }
