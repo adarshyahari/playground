@@ -197,7 +197,7 @@
     <input id="type-input" type="text" placeholder="Space adds a word · Backspace removes last" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
     <div id="type-hint">Space / Enter → reveal word &nbsp;·&nbsp; Backspace on empty → erase last word</div>
   </div>
-  <div id="version">Made by <a href="https://adarshya.webflow.io/" target="_blank" rel="noopener">Adarshya</a></div>
+  <div id="version">V2.0 . Made by <a href="https://adarshya.webflow.io/" target="_blank" rel="noopener">Adarshya</a></div>
 </div>
 <span id="sizer"></span>
 <!-- Ghost input for mobile: off-screen, captures keyboard without showing a box -->
@@ -542,8 +542,15 @@ const _origTryNextWord = tryNextWord;
 
 // ── Input listeners ─────────────────────────────────────────────────────
 function attachInputListeners(el) {
-  // Desktop: keydown is reliable — handle space/enter/backspace here.
-  // Mobile: keydown is unreliable for space; the input event handles everything.
+  let isComposing = false;
+
+  el.addEventListener('compositionstart', () => { isComposing = true; });
+  el.addEventListener('compositionend', (e) => {
+    isComposing = false;
+    // GBoard finalised the word — value is now the completed word (no space yet)
+    // Don't commit here; wait for the space that follows
+  });
+
   el.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -551,6 +558,7 @@ function attachInputListeners(el) {
       if (word) { queueWord(word); el.value = ''; }
       return;
     }
+    // Desktop only — on mobile keydown is unreliable
     if (!isMobileDevice()) {
       if (e.key === ' ' || e.key === 'Spacebar') {
         e.preventDefault();
@@ -564,15 +572,33 @@ function attachInputListeners(el) {
   });
 
   el.addEventListener('input', (e) => {
-    dbg('INPUT type=' + (e.inputType||'?') + ' val="' + el.value + '"');
     const type = e.inputType || '';
 
-    if (type === 'deleteContentBackward' && el.value === '') {
-      scheduleErase();
-      return;
+    // Backspace: field is now empty after deletion — erase last word
+    if (type === 'deleteContentBackward') {
+      if (el.value === '') scheduleErase();
+      return; // never process deletions further
     }
     if (type.startsWith('delete')) return;
 
+    // While GBoard is composing (insertCompositionText), the field value is
+    // a live preview that keeps getting rewritten. Do NOT act on spaces inside
+    // composition — wait until composition ends and the user explicitly taps space.
+    if (isComposing || type === 'insertCompositionText') {
+      // Only check for a real committed space: GBoard puts a space AFTER
+      // compositionend, so if we see a space here during composition it means
+      // GBoard itself is inserting it as part of autocomplete — commit the word.
+      const val = el.value;
+      if (val.endsWith(' ')) {
+        const word = val.trim();
+        if (word) { queueWord(word); }
+        el.value = '';
+        isComposing = false;
+      }
+      return;
+    }
+
+    // Non-composition input (desktop typing, paste, or finalised mobile word)
     const val = el.value;
     if (val.includes(' ')) {
       const parts = val.split(' ');
@@ -581,21 +607,6 @@ function attachInputListeners(el) {
       el.value = trailing;
     }
   });
-
-  el.addEventListener('keydown', (e2) => {
-    dbg('KD key=' + e2.key + ' val="' + el.value + '"');
-  });
-}
-
-// ── Debug overlay (remove when done) ────────────────────────────────────
-const debugEl = document.createElement('div');
-debugEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,0.85);color:#0f0;font:11px monospace;padding:6px 8px;z-index:99999;max-height:160px;overflow-y:auto;pointer-events:none;';
-document.body.appendChild(debugEl);
-const debugLines = [];
-function dbg(msg) {
-  debugLines.unshift(msg);
-  if (debugLines.length > 12) debugLines.length = 12;
-  debugEl.innerHTML = debugLines.map(l => '<div>' + l + '</div>').join('');
 }
 
 attachInputListeners(typeInput);
