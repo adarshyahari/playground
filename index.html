@@ -68,16 +68,9 @@
 #type-input-wrap.visible { display:block; }
 
 @media (max-width: 600px) {
-  #type-input-wrap.visible.keyboard-up {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    margin: 0;
-    padding: 10px 16px 12px;
-    background: #000;
-    border-top: 0.5px solid #222;
-    z-index: 9999;
+  #type-input-wrap,
+  #type-input-wrap.visible {
+    display: none !important;
   }
 }
 #type-input {
@@ -207,6 +200,8 @@
   <div id="version">Made by <a href="https://adarshya.webflow.io/" target="_blank" rel="noopener">Adarshya</a></div>
 </div>
 <span id="sizer"></span>
+<!-- Ghost input for mobile: off-screen, captures keyboard without showing a box -->
+<input id="ghost-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:-9999px;left:-9999px;font-size:16px;" />
 
 <script>
 const canvas = document.getElementById('canvas');
@@ -222,6 +217,8 @@ const typeLbl = document.getElementById('type-lbl');
 const statusEl = document.getElementById('status');
 const typeInputWrap = document.getElementById('type-input-wrap');
 const typeInput = document.getElementById('type-input');
+const ghostInput = document.getElementById('ghost-input');
+const isMobileDevice = () => window.innerWidth <= 600;
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (!SR) statusEl.textContent = 'Not supported — use Chrome';
@@ -500,16 +497,19 @@ function toggleType() {
 function setTypeOn() {
   typeOn=true; typeBtn.classList.add('on'); typeLbl.textContent='Done';
   statusEl.textContent='type mode';
-  typeInputWrap.classList.add('visible');
-  typeInput.value=''; typeInput.focus();
+  if (isMobileDevice()) {
+    ghostInput.value=''; ghostInput.focus();
+  } else {
+    typeInputWrap.classList.add('visible');
+    typeInput.value=''; typeInput.focus();
+  }
 }
 function setTypeOff() {
   typeOn=false; typeBtn.classList.remove('on'); typeLbl.textContent='Type';
   statusEl.textContent='ready';
   typeInputWrap.classList.remove('visible');
-  typeInputWrap.classList.remove('keyboard-up');
-  typeInputWrap.style.bottom='';
   typeInput.value='';
+  ghostInput.value=''; ghostInput.blur();
 }
 typeInput.addEventListener('keydown', (e) => {
   if (e.key===' '||e.key==='Spacebar') {
@@ -535,6 +535,33 @@ typeInput.addEventListener('input', (e) => {
     typeInput.value = '';
   }
 });
+// Ghost input listeners for mobile (no visible box)
+ghostInput.addEventListener('keydown', (e) => {
+  if (e.key===' '||e.key==='Spacebar') {
+    e.preventDefault();
+    const word = ghostInput.value.trim();
+    if (word) { queueWord(word); ghostInput.value=''; }
+  } else if (e.key==='Backspace' && ghostInput.value==='') {
+    e.preventDefault();
+    if (pendingWords.length > 0) { pendingWords.pop(); return; }
+    triggerErase();
+  } else if (e.key==='Enter') {
+    e.preventDefault();
+    const word = ghostInput.value.trim();
+    if (word) { queueWord(word); ghostInput.value=''; }
+  }
+});
+ghostInput.addEventListener('input', () => {
+  const val = ghostInput.value;
+  if (val.endsWith(' ')) {
+    const word = val.trim();
+    if (word) { queueWord(word); }
+    ghostInput.value = '';
+  }
+});
+ghostInput.addEventListener('blur', () => {
+  if (typeOn && isMobileDevice()) ghostInput.focus();
+});
 function clearAll() {
   setMicOff(); setTypeOff();
   committedWords=[]; pendingWords=[]; interimQueued=[];
@@ -553,30 +580,11 @@ window.addEventListener('resize', () => {
   }, 100);
 });
 
-// Also handle viewport changes (virtual keyboard on mobile)
-if (window.visualViewport) {
-  const onVVResize = () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      syncCanvas();
-      // Sticky input: pin to top of keyboard when keyboard is open
-      const isMobile = window.innerWidth <= 600;
-      if (isMobile && typeOn) {
-        const vv = window.visualViewport;
-        const kbHeight = window.innerHeight - vv.height - vv.offsetTop;
-        if (kbHeight > 100) {
-          typeInputWrap.classList.add('keyboard-up');
-          typeInputWrap.style.bottom = '0px';
-        } else {
-          typeInputWrap.classList.remove('keyboard-up');
-          typeInputWrap.style.bottom = '';
-        }
-      }
-    }, 80);
-  };
-  window.visualViewport.addEventListener('resize', onVVResize);
-  window.visualViewport.addEventListener('scroll', onVVResize);
-}
+// Handle viewport changes (virtual keyboard on mobile)
+window.visualViewport && window.visualViewport.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(syncCanvas, 100);
+});
 
 syncCanvas();
 drawFrame();
