@@ -197,7 +197,7 @@
     <input id="type-input" type="text" placeholder="Space adds a word · Backspace removes last" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
     <div id="type-hint">Space / Enter → reveal word &nbsp;·&nbsp; Backspace on empty → erase last word</div>
   </div>
-  <div id="version">Made by <a href="https://adarshya.webflow.io/" target="_blank" rel="noopener">Adarshya</a></div>
+  <div id="version">V2. Made by <a href="https://adarshya.webflow.io/" target="_blank" rel="noopener">Adarshya</a></div>
 </div>
 <span id="sizer"></span>
 <!-- Ghost input for mobile: off-screen, captures keyboard without showing a box -->
@@ -540,49 +540,49 @@ const _origTryNextWord = tryNextWord;
 // We do this by wrapping the phase-idle transitions inside drawFrame.
 // Simpler: poll in rAF — drainEraseQueue is cheap when queue is empty.
 
-// ── Composition guard (mobile IME) ───────────────────────────────────────
-let composing = false;
+// ── Input listeners ─────────────────────────────────────────────────────
+function commitWord(el) {
+  const word = el.value.trim();
+  if (word) { queueWord(word); }
+  el.value = '';
+}
 
 function attachInputListeners(el) {
-  el.addEventListener('compositionstart', () => { composing = true; });
-  el.addEventListener('compositionend', (e) => {
-    composing = false;
-    // compositionend value may include the committed text — treat as normal input
-    const val = el.value;
-    if (val.includes(' ')) {
-      const word = val.trim();
-      if (word) { queueWord(word); }
-      el.value = '';
-    }
-  });
-
+  // keydown: handles desktop space/enter/backspace reliably
   el.addEventListener('keydown', (e) => {
     if (e.key === ' ' || e.key === 'Spacebar') {
-      if (!composing) {
+      // On desktop, preventDefault stops space entering the field; we commit manually.
+      // On mobile, keydown for space is unreliable — the input event handles it instead.
+      if (!isMobileDevice()) {
         e.preventDefault();
-        const word = el.value.trim();
-        if (word) { queueWord(word); el.value = ''; }
+        commitWord(el);
       }
     } else if (e.key === 'Backspace') {
       if (el.value === '') {
         e.preventDefault();
         scheduleErase();
       }
-      // else let backspace delete the typed char normally
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const word = el.value.trim();
-      if (word) { queueWord(word); el.value = ''; }
+      commitWord(el);
     }
   });
 
+  // input: primary handler for mobile (catches space from soft keyboard).
+  // We only act on insertions — ignore replacements (autocorrect rewrites).
   el.addEventListener('input', (e) => {
-    if (composing) return; // wait for compositionend
+    // Skip autocorrect replacements — they rewrite the whole value and
+    // would cause double-commits or garbled words (the '?' / reversed-word bugs).
+    if (e.inputType === 'insertReplacementText') return;
+
     const val = el.value;
     if (val.includes(' ')) {
-      const word = val.trim();
-      if (word) { queueWord(word); }
-      el.value = '';
+      // Split on spaces: all complete tokens before the last space get queued,
+      // any trailing partial word stays in the input for continued typing.
+      const parts = val.split(' ');
+      const trailing = parts.pop(); // text after the last space (may be empty)
+      parts.forEach(w => { if (w.trim()) queueWord(w.trim()); });
+      el.value = trailing; // keep only the unfinished part
     }
   });
 }
