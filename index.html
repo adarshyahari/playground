@@ -66,23 +66,35 @@
   #version a:hover { color: white; }
 #type-input-wrap { display:none; margin-top:1rem; width:100%; }
 #type-input-wrap.visible { display:block; }
-
-@media (max-width: 600px) {
-  #type-input-wrap,
-  #type-input-wrap.visible {
-    display: none !important;
-  }
-}
 #type-input {
   background:#111; border:0.5px solid #333; color:#fff;
-  padding:10px 16px; border-radius:8px; font-size:16px;
+  padding:10px 16px; border-radius:8px;
+  font-size: max(16px, 1em);
   width:100%; outline:none;
   font-family:-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-  /* Prevent iOS zoom on focus */
-  font-size: max(16px, 1em);
 }
 #type-input:focus { border-color:#38bdf8; }
 #type-hint { font-size:12px; color:#444; margin-top:6px; }
+
+/* Mobile: input bar is fixed above the keyboard via JS */
+@media (max-width: 600px) {
+  #type-input-wrap.visible {
+    display: block;
+    position: fixed;
+    left: 0; right: 0;
+    padding: 10px 16px 12px;
+    background: #000;
+    border-top: 0.5px solid #222;
+    z-index: 9999;
+    /* bottom is set dynamically by JS to sit above keyboard */
+    bottom: 0;
+  }
+  #type-input {
+    font-size: 16px;
+    padding: 10px 14px;
+  }
+  #type-hint { font-size: 11px; }
+}
 
 /* ── Mobile overrides ── */
 @media (max-width: 600px) {
@@ -197,11 +209,9 @@
     <input id="type-input" type="text" placeholder="Space adds a word · Backspace removes last" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
     <div id="type-hint">Space / Enter → reveal word &nbsp;·&nbsp; Backspace on empty → erase last word</div>
   </div>
-  <div id="version">V2.0 . Made by <a href="https://adarshya.webflow.io/" target="_blank" rel="noopener">Adarshya</a></div>
+  <div id="version">V3.0 Made by <a href="https://adarshya.webflow.io/" target="_blank" rel="noopener">Adarshya</a></div>
 </div>
 <span id="sizer"></span>
-<!-- Ghost input for mobile: off-screen, captures keyboard without showing a box -->
-<input id="ghost-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:-9999px;left:-9999px;font-size:16px;" />
 
 <script>
 const canvas = document.getElementById('canvas');
@@ -217,7 +227,6 @@ const typeLbl = document.getElementById('type-lbl');
 const statusEl = document.getElementById('status');
 const typeInputWrap = document.getElementById('type-input-wrap');
 const typeInput = document.getElementById('type-input');
-const ghostInput = document.getElementById('ghost-input');
 const isMobileDevice = () => window.innerWidth <= 600;
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -497,19 +506,27 @@ function toggleType() {
 function setTypeOn() {
   typeOn=true; typeBtn.classList.add('on'); typeLbl.textContent='Done';
   statusEl.textContent='type mode';
-  if (isMobileDevice()) {
-    ghostInput.value=''; ghostInput.focus();
-  } else {
-    typeInputWrap.classList.add('visible');
-    typeInput.value=''; typeInput.focus();
-  }
+  typeInputWrap.classList.add('visible');
+  typeInput.value='';
+  positionInputBar();
+  // Small delay so the DOM shows the input before we focus (avoids Android jump)
+  setTimeout(() => typeInput.focus(), 50);
 }
 function setTypeOff() {
   typeOn=false; typeBtn.classList.remove('on'); typeLbl.textContent='Type';
   statusEl.textContent='ready';
   typeInputWrap.classList.remove('visible');
+  typeInputWrap.style.bottom = '';
   typeInput.value='';
-  ghostInput.value=''; ghostInput.blur();
+  typeInput.blur();
+}
+function positionInputBar() {
+  if (!isMobileDevice() || !typeOn) return;
+  const vv = window.visualViewport;
+  if (!vv) return;
+  // Distance from bottom of visual viewport to bottom of layout viewport = keyboard height
+  const kbHeight = window.innerHeight - (vv.offsetTop + vv.height);
+  typeInputWrap.style.bottom = Math.max(0, kbHeight) + 'px';
 }
 // ── Erase queue: allows rapid backspace to stack up erases ──────────────
 let eraseQueue = 0;
@@ -541,79 +558,52 @@ const _origTryNextWord = tryNextWord;
 // Simpler: poll in rAF — drainEraseQueue is cheap when queue is empty.
 
 // ── Input listeners ─────────────────────────────────────────────────────
-function attachInputListeners(el) {
-  let isComposing = false;
+// Single input element for both desktop and mobile.
+// On desktop: keydown is reliable, we preventDefault on space.
+// On Android GBoard: keydown fires key="Unidentified", so space/backspace
+//   must be detected via the 'input' event's inputType instead.
 
-  el.addEventListener('compositionstart', () => { isComposing = true; });
-  el.addEventListener('compositionend', (e) => {
-    isComposing = false;
-    // GBoard finalised the word — value is now the completed word (no space yet)
-    // Don't commit here; wait for the space that follows
-  });
+typeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const word = typeInput.value.trim();
+    if (word) { queueWord(word); typeInput.value = ''; }
+    return;
+  }
+  if (e.key === ' ' || e.key === 'Spacebar') {
+    e.preventDefault();
+    const word = typeInput.value.trim();
+    if (word) { queueWord(word); typeInput.value = ''; }
+    return;
+  }
+  if (e.key === 'Backspace' && typeInput.value === '') {
+    e.preventDefault();
+    scheduleErase();
+  }
+});
 
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const word = el.value.trim();
-      if (word) { queueWord(word); el.value = ''; }
-      return;
-    }
-    // Desktop only — on mobile keydown is unreliable
-    if (!isMobileDevice()) {
-      if (e.key === ' ' || e.key === 'Spacebar') {
-        e.preventDefault();
-        const word = el.value.trim();
-        if (word) { queueWord(word); el.value = ''; }
-      } else if (e.key === 'Backspace' && el.value === '') {
-        e.preventDefault();
-        scheduleErase();
-      }
-    }
-  });
+typeInput.addEventListener('input', (e) => {
+  const type = e.inputType || '';
 
-  el.addEventListener('input', (e) => {
-    const type = e.inputType || '';
+  // Android GBoard backspace fires as deleteContentBackward in the input event
+  if (type === 'deleteContentBackward') {
+    if (typeInput.value === '') scheduleErase();
+    return;
+  }
 
-    // Backspace: field is now empty after deletion — erase last word
-    if (type === 'deleteContentBackward') {
-      if (el.value === '') scheduleErase();
-      return; // never process deletions further
-    }
-    if (type.startsWith('delete')) return;
+  // Ignore all other deletions — they are mid-word edits, leave them alone
+  if (type.startsWith('delete')) return;
 
-    // While GBoard is composing (insertCompositionText), the field value is
-    // a live preview that keeps getting rewritten. Do NOT act on spaces inside
-    // composition — wait until composition ends and the user explicitly taps space.
-    if (isComposing || type === 'insertCompositionText') {
-      // Only check for a real committed space: GBoard puts a space AFTER
-      // compositionend, so if we see a space here during composition it means
-      // GBoard itself is inserting it as part of autocomplete — commit the word.
-      const val = el.value;
-      if (val.endsWith(' ')) {
-        const word = val.trim();
-        if (word) { queueWord(word); }
-        el.value = '';
-        isComposing = false;
-      }
-      return;
-    }
-
-    // Non-composition input (desktop typing, paste, or finalised mobile word)
-    const val = el.value;
-    if (val.includes(' ')) {
-      const parts = val.split(' ');
-      const trailing = parts.pop();
-      parts.forEach(w => { if (w.trim()) queueWord(w.trim()); });
-      el.value = trailing;
-    }
-  });
-}
-
-attachInputListeners(typeInput);
-attachInputListeners(ghostInput);
-
-ghostInput.addEventListener('blur', () => {
-  if (typeOn && isMobileDevice()) setTimeout(() => ghostInput.focus(), 50);
+  // For any insertion, check if a space has appeared in the value.
+  // This catches GBoard's space (which bypasses keydown) as well as
+  // autocomplete completions that include a trailing space.
+  const val = typeInput.value;
+  if (val.includes(' ')) {
+    const parts = val.split(' ');
+    const trailing = parts.pop(); // keep text after last space in the field
+    parts.forEach(w => { const t = w.trim(); if (t) queueWord(t); });
+    typeInput.value = trailing;
+  }
 });
 function clearAll() {
   setMicOff(); setTypeOff();
@@ -633,11 +623,15 @@ window.addEventListener('resize', () => {
   }, 100);
 });
 
-// Handle viewport changes (virtual keyboard on mobile)
-window.visualViewport && window.visualViewport.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(syncCanvas, 100);
-});
+// Handle viewport changes — reposition input bar + sync canvas
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    positionInputBar();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(syncCanvas, 100);
+  });
+  window.visualViewport.addEventListener('scroll', positionInputBar);
+}
 
 syncCanvas();
 drawFrame();
