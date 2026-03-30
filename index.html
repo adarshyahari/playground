@@ -66,6 +66,20 @@
   #version a:hover { color: white; }
 #type-input-wrap { display:none; margin-top:1rem; width:100%; }
 #type-input-wrap.visible { display:block; }
+
+@media (max-width: 600px) {
+  #type-input-wrap.visible.keyboard-up {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 10px 16px 12px;
+    background: #000;
+    border-top: 0.5px solid #222;
+    z-index: 9999;
+  }
+}
 #type-input {
   background:#111; border:0.5px solid #333; color:#fff;
   padding:10px 16px; border-radius:8px; font-size:16px;
@@ -103,16 +117,16 @@
 
   #mic-btn,
   #type-btn {
-    padding: 14px 26px;
-    font-size: 17px;
-    min-height: 54px;
-    gap: 10px;
+    padding: 9px 16px;
+    font-size: 14px;
+    min-height: 38px;
+    gap: 7px;
   }
 
   #clear-btn {
-    padding: 14px 20px;
-    font-size: 17px;
-    min-height: 54px;
+    padding: 9px 14px;
+    font-size: 14px;
+    min-height: 38px;
   }
 
   .dot { width: 10px; height: 10px; }
@@ -128,14 +142,14 @@
   }
 
   #type-input {
-    font-size: 18px !important;
-    padding: 14px 18px;
-    border-radius: 10px;
+    font-size: 16px !important;
+    padding: 8px 12px;
+    border-radius: 8px;
   }
 
   #type-hint {
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: 11px;
+    line-height: 1.5;
   }
 
   #version {
@@ -492,7 +506,10 @@ function setTypeOn() {
 function setTypeOff() {
   typeOn=false; typeBtn.classList.remove('on'); typeLbl.textContent='Type';
   statusEl.textContent='ready';
-  typeInputWrap.classList.remove('visible'); typeInput.value='';
+  typeInputWrap.classList.remove('visible');
+  typeInputWrap.classList.remove('keyboard-up');
+  typeInputWrap.style.bottom='';
+  typeInput.value='';
 }
 typeInput.addEventListener('keydown', (e) => {
   if (e.key===' '||e.key==='Spacebar') {
@@ -507,6 +524,15 @@ typeInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     const word = typeInput.value.trim();
     if (word) { queueWord(word); typeInput.value=''; }
+  }
+});
+// Mobile soft keyboards don't always fire keydown for space — use input event as fallback
+typeInput.addEventListener('input', (e) => {
+  const val = typeInput.value;
+  if (val.endsWith(' ')) {
+    const word = val.trim();
+    if (word) { queueWord(word); }
+    typeInput.value = '';
   }
 });
 function clearAll() {
@@ -528,10 +554,29 @@ window.addEventListener('resize', () => {
 });
 
 // Also handle viewport changes (virtual keyboard on mobile)
-window.visualViewport && window.visualViewport.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(syncCanvas, 100);
-});
+if (window.visualViewport) {
+  const onVVResize = () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      syncCanvas();
+      // Sticky input: pin to top of keyboard when keyboard is open
+      const isMobile = window.innerWidth <= 600;
+      if (isMobile && typeOn) {
+        const vv = window.visualViewport;
+        const kbHeight = window.innerHeight - vv.height - vv.offsetTop;
+        if (kbHeight > 100) {
+          typeInputWrap.classList.add('keyboard-up');
+          typeInputWrap.style.bottom = '0px';
+        } else {
+          typeInputWrap.classList.remove('keyboard-up');
+          typeInputWrap.style.bottom = '';
+        }
+      }
+    }, 80);
+  };
+  window.visualViewport.addEventListener('resize', onVVResize);
+  window.visualViewport.addEventListener('scroll', onVVResize);
+}
 
 syncCanvas();
 drawFrame();
